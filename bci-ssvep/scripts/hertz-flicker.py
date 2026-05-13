@@ -1,18 +1,14 @@
-"""SSVEP 4-box flicker stimulus with real-time BrainFlow frequency detection.
+"""SSVEP 2-box flicker stimulus with real-time BrainFlow frequency detection.
 
-Four boxes flicker at distinct SSVEP frequencies. When the detected dominant
-frequency matches a box's target (within tolerance), that box turns its
-highlight color instead of white/black.
+Two boxes flicker at maximally separated SSVEP frequencies (exact 60 Hz divisors).
+When the detected dominant frequency matches a box with sufficient SNR, that box
+turns its highlight color.
 
-Frequencies (all exact divisors of 60 Hz):
-  Box 0 (top-left)     :  6 Hz  -> red    (60÷10)
-  Box 1 (top-right)    : 10 Hz  -> green  (60÷6)
-  Box 2 (bottom-left)  : 12 Hz  -> blue   (60÷5)
-  Box 3 (bottom-right) : 15 Hz  -> yellow (60÷4)
+  Box 0 (left)  :  6 Hz  -> red    (60÷10)
+  Box 1 (right) : 15 Hz  -> yellow (60÷4)
 
-Run with --board-id to select a real board (default: synthetic).
-Run with --no-eeg to show only the visual stimulus without BrainFlow.
-Press F11 or Escape to toggle/exit fullscreen.
+Press F11 to toggle fullscreen, Escape to exit fullscreen.
+Run with --board-id 57 for Neuropawn Knight, --no-eeg for visual-only mode.
 """
 
 from __future__ import annotations
@@ -41,14 +37,15 @@ from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
 
 BOXES = [
     {"freq": 6.0,  "label": "6 Hz",  "color": "#FF4444"},  # red    (60÷10)
-    {"freq": 10.0, "label": "10 Hz", "color": "#44FF44"},  # green  (60÷6)
-    {"freq": 12.0, "label": "12 Hz", "color": "#4488FF"},  # blue   (60÷5)
     {"freq": 15.0, "label": "15 Hz", "color": "#FFFF44"},  # yellow (60÷4)
 ]
 
-DETECT_TOLERANCE_HZ = 0.8   # how close detected peak must be to a target freq
-WINDOW_SECONDS = 2.0        # EEG analysis window
-ANALYSIS_INTERVAL_S = 0.5   # how often to run FFT detection
+DETECT_TOLERANCE_HZ = 0.6   # peak must be within this of a target freq
+SNR_THRESHOLD       = 3.0   # peak power must be this many times the noise floor
+WINDOW_SECONDS      = 2.0   # EEG analysis window length
+ANALYSIS_INTERVAL_S = 0.5   # how often to run detection
+
+BOX_FRACTION = 0.38          # each box is 38% of screen height/width
 
 
 # ---------------------------------------------------------------------------
@@ -58,15 +55,20 @@ ANALYSIS_INTERVAL_S = 0.5   # how often to run FFT detection
 class FlickerState:
     def __init__(self) -> None:
         self.detected_freq: Optional[float] = None
+        self.counts: dict[float, int] = {box["freq"]: 0 for box in BOXES}
+        self.total: int = 0
         self.lock = threading.Lock()
 
     def set_detected(self, freq: Optional[float]) -> None:
         with self.lock:
             self.detected_freq = freq
+            self.total += 1
+            if freq is not None and freq in self.counts:
+                self.counts[freq] += 1
 
-    def get_detected(self) -> Optional[float]:
+    def snapshot(self) -> tuple[Optional[float], dict[float, int], int]:
         with self.lock:
-            return self.detected_freq
+            return self.detected_freq, dict(self.counts), self.total
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,6 @@ class FlickerState:
 # ---------------------------------------------------------------------------
 
 def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threading.Event) -> None:
-    """Runs in background: streams EEG, computes Welch PSD, updates detected freq."""
     from scipy.signal import welch as scipy_welch
 
     params = BrainFlowInputParams()
@@ -94,9 +95,8 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
                 continue
 
             raw = board.get_current_board_data(window_samples)
-            eeg = raw[eeg_channels, :]  # (n_ch, n_samples)
+            eeg = raw[eeg_channels, :]
 
-            # Average Welch PSD across channels
             nperseg = min(256, eeg.shape[1])
             psds = []
             freqs = None
@@ -109,19 +109,27 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
 
             psd_mean = np.mean(np.stack(psds, axis=0), axis=0)
 
-            # Only look in SSVEP range (4-30 Hz)
+            # Find peak in SSVEP range
             mask = (freqs >= 4.0) & (freqs <= 30.0)
             if not np.any(mask):
                 continue
 
-            peak_freq = float(freqs[mask][np.argmax(psd_mean[mask])])
+            psd_ssvep = psd_mean[mask]
+            freqs_ssvep = freqs[mask]
+            peak_idx = int(np.argmax(psd_ssvep))
+            peak_freq = float(freqs_ssvep[peak_idx])
+            peak_power = float(psd_ssvep[peak_idx])
 
-            # Check if peak matches any target
+            # Noise floor: median of the SSVEP band (robust to single spikes)
+            noise_floor = float(np.median(psd_ssvep))
+            snr = peak_power / (noise_floor + 1e-12)
+
             matched = None
-            for box in BOXES:
-                if abs(peak_freq - box["freq"]) <= DETECT_TOLERANCE_HZ:
-                    matched = box["freq"]
-                    break
+            if snr >= SNR_THRESHOLD:
+                for box in BOXES:
+                    if abs(peak_freq - box["freq"]) <= DETECT_TOLERANCE_HZ:
+                        matched = box["freq"]
+                        break
 
             state.set_detected(matched)
 
@@ -140,23 +148,15 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
 # GUI
 # ---------------------------------------------------------------------------
 
-# Boxes occupy this fraction of the screen dimension on each axis.
-# Leaves a large dark gap between boxes to prevent visual interference.
-BOX_FRACTION = 0.30   # each box is 30% of screen width/height
-GAP_FRACTION  = 0.10  # gap between boxes is 10% of screen dimension
-
-
 class SSVEPFlickerApp:
 
     def __init__(self, root: tk.Tk, state: FlickerState) -> None:
         self.root = root
         self.state = state
 
-        root.title("SSVEP 4-Box Flicker")
+        root.title("SSVEP Flicker")
         root.configure(bg="#000000")
         root.attributes("-fullscreen", True)
-
-        # F11 toggles fullscreen; Escape exits fullscreen (back to window)
         root.bind("<F11>", self._toggle_fullscreen)
         root.bind("<Escape>", self._exit_fullscreen)
 
@@ -167,18 +167,14 @@ class SSVEPFlickerApp:
         self._last_time = time.perf_counter()
         self._rects: list[int] = []
         self._labels: list[int] = []
+        self._status_text: Optional[int] = None
         self._fullscreen = True
 
-        # Build after geometry is resolved
         root.update_idletasks()
-        self._build_boxes()
-        root.bind("<Configure>", self._on_resize)
+        self._build_layout()
+        root.bind("<Configure>", lambda *_: self._build_layout())
 
         self._tick()
-
-    # ------------------------------------------------------------------
-    # Fullscreen helpers
-    # ------------------------------------------------------------------
 
     def _toggle_fullscreen(self, *_) -> None:
         self._fullscreen = not self._fullscreen
@@ -188,51 +184,39 @@ class SSVEPFlickerApp:
         self._fullscreen = False
         self.root.attributes("-fullscreen", False)
 
-    # ------------------------------------------------------------------
-    # Layout
-    # ------------------------------------------------------------------
-
-    def _on_resize(self, *_) -> None:
-        self._build_boxes()
-
     def _box_rects(self) -> list[tuple[int, int, int, int]]:
-        """Return (x1, y1, x2, y2) for each of the 4 boxes, centred in each quadrant."""
-        sw = self.canvas.winfo_width()
-        sh = self.canvas.winfo_height()
-        if sw < 2 or sh < 2:
-            sw, sh = self.root.winfo_width(), self.root.winfo_height()
+        sw = self.canvas.winfo_width() or self.root.winfo_width()
+        sh = self.canvas.winfo_height() or self.root.winfo_height()
 
         bw = int(sw * BOX_FRACTION)
         bh = int(sh * BOX_FRACTION)
+        cy = sh // 2
 
-        # Quadrant centres: each quadrant is sw/2 × sh/2
-        qw, qh = sw // 2, sh // 2
+        # Left box centred at 25% width, right box at 75% width
+        centres = [sw // 4, 3 * sw // 4]
         rects = []
-        for col, row in [(0, 0), (1, 0), (0, 1), (1, 1)]:
-            cx = qw * col + qw // 2
-            cy = qh * row + qh // 2
+        for cx in centres:
             rects.append((cx - bw // 2, cy - bh // 2, cx + bw // 2, cy + bh // 2))
         return rects
 
-    def _font_size(self) -> int:
-        sh = self.canvas.winfo_height() or self.root.winfo_height()
-        return max(12, int(sh * 0.030))
-
-    def _build_boxes(self) -> None:
+    def _build_layout(self) -> None:
         self.canvas.delete("all")
         self._rects = []
         self._labels = []
+        self._status_text = None
 
-        font = ("Helvetica", self._font_size(), "bold")
-        for i, coords in enumerate(self._box_rects()):
-            x1, y1, x2, y2 = coords
+        sw = self.canvas.winfo_width() or self.root.winfo_width()
+        sh = self.canvas.winfo_height() or self.root.winfo_height()
+        font_size = max(14, int(sh * 0.035))
+        font = ("Helvetica", font_size, "bold")
+
+        for i, (x1, y1, x2, y2) in enumerate(self._box_rects()):
             rect = self.canvas.create_rectangle(
                 x1, y1, x2, y2,
                 fill="black", outline="#222222", width=2,
             )
-            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
             label = self.canvas.create_text(
-                cx, cy,
+                (x1 + x2) // 2, (y1 + y2) // 2,
                 text=BOXES[i]["label"],
                 font=font,
                 fill="#555555",
@@ -240,20 +224,25 @@ class SSVEPFlickerApp:
             self._rects.append(rect)
             self._labels.append(label)
 
-    # ------------------------------------------------------------------
-    # Flicker loop
-    # ------------------------------------------------------------------
+        status_font = ("Courier", max(11, int(sh * 0.020)), "normal")
+        self._status_text = self.canvas.create_text(
+            sw // 2, sh - max(16, int(sh * 0.04)),
+            text="waiting for EEG...",
+            font=status_font,
+            fill="#ffffff",
+            anchor="center",
+        )
 
     def _tick(self) -> None:
         now = time.perf_counter()
         dt = now - self._last_time
         self._last_time = now
 
-        detected = self.state.get_detected()
+        detected, counts, total = self.state.snapshot()
 
         for i, box in enumerate(BOXES):
             self._phases[i] = (self._phases[i] + box["freq"] * dt) % 1.0
-            on = self._phases[i] < 0.5  # square wave
+            on = self._phases[i] < 0.5
 
             if detected is not None and abs(detected - box["freq"]) <= DETECT_TOLERANCE_HZ:
                 fill = box["color"] if on else "#111111"
@@ -265,31 +254,30 @@ class SSVEPFlickerApp:
             self.canvas.itemconfig(self._rects[i], fill=fill)
             self.canvas.itemconfig(self._labels[i], fill=text_color)
 
-        self.root.after(8, self._tick)  # ~120 Hz update loop
+        if self._status_text is not None:
+            now_str = f"{detected:.1f} Hz" if detected is not None else "none"
+            counts_str = "  |  ".join(
+                f"{box['freq']:.0f}Hz: {counts.get(box['freq'], 0)}"
+                for box in BOXES
+            )
+            self.canvas.itemconfig(
+                self._status_text,
+                text=f"detected: {now_str}    [{counts_str}]    total windows: {total}",
+                fill="#ffffff",
+            )
+
+        self.root.after(8, self._tick)
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="SSVEP 4-box flicker with BrainFlow detection.")
-    parser.add_argument(
-        "--board-id",
-        type=int,
-        default=int(BoardIds.SYNTHETIC_BOARD),
-        help="BrainFlow board ID (default: synthetic board).",
-    )
-    parser.add_argument(
-        "--no-eeg",
-        action="store_true",
-        help="Run visual stimulus only, no EEG acquisition.",
-    )
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
+    parser = argparse.ArgumentParser(description="SSVEP 2-box flicker with BrainFlow detection.")
+    parser.add_argument("--board-id", type=int, default=int(BoardIds.SYNTHETIC_BOARD))
+    parser.add_argument("--no-eeg", action="store_true")
+    args = parser.parse_args()
 
     state = FlickerState()
     stop_event = threading.Event()
