@@ -8,7 +8,10 @@ turns its highlight color.
   Box 1 (right) : 15 Hz  -> yellow (60÷4)
 
 Press F11 to toggle fullscreen, Escape to exit fullscreen.
-Run with --board-id 57 for Neuropawn Knight, --no-eeg for visual-only mode.
+
+Usage:
+  python hertz-flicker.py --serial-port COM3 --channels 8
+  python hertz-flicker.py --no-eeg   (visual only, no board needed)
 """
 
 from __future__ import annotations
@@ -40,16 +43,15 @@ BOXES = [
     {"freq": 15.0, "label": "15 Hz", "color": "#FFFF44"},  # yellow (60÷4)
 ]
 
-DETECT_TOLERANCE_HZ = 0.6   # peak must be within this of a target freq
-SNR_THRESHOLD       = 3.0   # peak power must be this many times the noise floor
-WINDOW_SECONDS      = 2.0   # EEG analysis window length
-ANALYSIS_INTERVAL_S = 0.5   # how often to run detection
-
-BOX_FRACTION = 0.38          # each box is 38% of screen height/width
+DETECT_TOLERANCE_HZ = 0.6  # peak must be within this of a target freq
+SNR_THRESHOLD       = 1.5  # peak must be this many times the noise floor
+WINDOW_SECONDS      = 2.0  # EEG analysis window length
+ANALYSIS_INTERVAL_S = 0.5  # how often to run detection
+BOX_FRACTION        = 0.38 # each box is this fraction of screen width/height
 
 
 # ---------------------------------------------------------------------------
-# Flicker state
+# Flicker state (shared between EEG thread and GUI thread)
 # ---------------------------------------------------------------------------
 
 class FlickerState:
@@ -57,14 +59,22 @@ class FlickerState:
         self.detected_freq: Optional[float] = None
         self.counts: dict[float, int] = {box["freq"]: 0 for box in BOXES}
         self.total: int = 0
+        self._raw_peak: Optional[float] = None
+        self._raw_snr: float = 0.0
         self.lock = threading.Lock()
 
-    def set_detected(self, freq: Optional[float]) -> None:
+    def set_detected(self, freq: Optional[float], peak: float, snr: float) -> None:
         with self.lock:
             self.detected_freq = freq
+            self._raw_peak = peak
+            self._raw_snr = snr
             self.total += 1
             if freq is not None and freq in self.counts:
                 self.counts[freq] += 1
+
+    def get_raw(self) -> tuple[Optional[float], float]:
+        with self.lock:
+            return self._raw_peak, self._raw_snr
 
     def snapshot(self) -> tuple[Optional[float], dict[float, int], int]:
         with self.lock:
@@ -75,18 +85,41 @@ class FlickerState:
 # EEG analysis thread
 # ---------------------------------------------------------------------------
 
-def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threading.Event) -> None:
+def eeg_analysis_thread(
+    state: FlickerState,
+    stop_event: threading.Event,
+    serial_port: str,
+    num_channels: int,
+) -> None:
     from scipy.signal import welch as scipy_welch
 
     params = BrainFlowInputParams()
+    params.serial_port = serial_port
+    params.other_info = '{"gain": 6}'
+
+    board_id = BoardIds.NEUROPAWN_KNIGHT_BOARD.value
     board = BoardShim(board_id, params)
     BoardShim.disable_board_logger()
 
     try:
         board.prepare_session()
-        board.start_stream(45000)
+        board.start_stream(450000)
+        print("Stream started, activating channels...", flush=True)
+        time.sleep(2)
+
+        for ch in range(1, num_channels + 1):
+            time.sleep(0.5)
+            board.config_board(f"chon_{ch}_12")
+            print(f"  chon_{ch}_12", flush=True)
+            time.sleep(1)
+            board.config_board(f"rldadd_{ch}")
+            print(f"  rldadd_{ch}", flush=True)
+            time.sleep(0.5)
+
+        print("Board ready. Streaming EEG...", flush=True)
+
         fs = float(BoardShim.get_sampling_rate(board_id))
-        eeg_channels = list(BoardShim.get_eeg_channels(board_id))
+        eeg_channels = list(BoardShim.get_exg_channels(board_id))[:num_channels]
         window_samples = int(WINDOW_SECONDS * fs)
 
         while not stop_event.is_set():
@@ -109,7 +142,6 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
 
             psd_mean = np.mean(np.stack(psds, axis=0), axis=0)
 
-            # Find peak in SSVEP range
             mask = (freqs >= 4.0) & (freqs <= 30.0)
             if not np.any(mask):
                 continue
@@ -119,8 +151,6 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
             peak_idx = int(np.argmax(psd_ssvep))
             peak_freq = float(freqs_ssvep[peak_idx])
             peak_power = float(psd_ssvep[peak_idx])
-
-            # Noise floor: median of the SSVEP band (robust to single spikes)
             noise_floor = float(np.median(psd_ssvep))
             snr = peak_power / (noise_floor + 1e-12)
 
@@ -131,7 +161,8 @@ def eeg_analysis_thread(state: FlickerState, board_id: int, stop_event: threadin
                         matched = box["freq"]
                         break
 
-            state.set_detected(matched)
+            print(f"peak={peak_freq:.2f}Hz  snr={snr:.2f}  matched={matched}", flush=True)
+            state.set_detected(matched, peak_freq, snr)
 
     finally:
         try:
@@ -187,15 +218,11 @@ class SSVEPFlickerApp:
     def _box_rects(self) -> list[tuple[int, int, int, int]]:
         sw = self.canvas.winfo_width() or self.root.winfo_width()
         sh = self.canvas.winfo_height() or self.root.winfo_height()
-
         bw = int(sw * BOX_FRACTION)
         bh = int(sh * BOX_FRACTION)
         cy = sh // 2
-
-        # Left box centred at 25% width, right box at 75% width
-        centres = [sw // 4, 3 * sw // 4]
         rects = []
-        for cx in centres:
+        for cx in [sw // 4, 3 * sw // 4]:
             rects.append((cx - bw // 2, cy - bh // 2, cx + bw // 2, cy + bh // 2))
         return rects
 
@@ -207,19 +234,15 @@ class SSVEPFlickerApp:
 
         sw = self.canvas.winfo_width() or self.root.winfo_width()
         sh = self.canvas.winfo_height() or self.root.winfo_height()
-        font_size = max(14, int(sh * 0.035))
-        font = ("Helvetica", font_size, "bold")
+        font = ("Helvetica", max(14, int(sh * 0.035)), "bold")
 
         for i, (x1, y1, x2, y2) in enumerate(self._box_rects()):
             rect = self.canvas.create_rectangle(
-                x1, y1, x2, y2,
-                fill="black", outline="#222222", width=2,
+                x1, y1, x2, y2, fill="black", outline="#222222", width=2,
             )
             label = self.canvas.create_text(
                 (x1 + x2) // 2, (y1 + y2) // 2,
-                text=BOXES[i]["label"],
-                font=font,
-                fill="#555555",
+                text=BOXES[i]["label"], font=font, fill="#555555",
             )
             self._rects.append(rect)
             self._labels.append(label)
@@ -228,9 +251,7 @@ class SSVEPFlickerApp:
         self._status_text = self.canvas.create_text(
             sw // 2, sh - max(16, int(sh * 0.04)),
             text="waiting for EEG...",
-            font=status_font,
-            fill="#ffffff",
-            anchor="center",
+            font=status_font, fill="#ffffff", anchor="center",
         )
 
     def _tick(self) -> None:
@@ -239,6 +260,7 @@ class SSVEPFlickerApp:
         self._last_time = now
 
         detected, counts, total = self.state.snapshot()
+        raw_peak, raw_snr = self.state.get_raw()
 
         for i, box in enumerate(BOXES):
             self._phases[i] = (self._phases[i] + box["freq"] * dt) % 1.0
@@ -257,12 +279,12 @@ class SSVEPFlickerApp:
         if self._status_text is not None:
             now_str = f"{detected:.1f} Hz" if detected is not None else "none"
             counts_str = "  |  ".join(
-                f"{box['freq']:.0f}Hz: {counts.get(box['freq'], 0)}"
-                for box in BOXES
+                f"{box['freq']:.0f}Hz: {counts.get(box['freq'], 0)}" for box in BOXES
             )
+            raw_str = f"peak={raw_peak:.1f}Hz snr={raw_snr:.2f}" if raw_peak is not None else "peak=?"
             self.canvas.itemconfig(
                 self._status_text,
-                text=f"detected: {now_str}    [{counts_str}]    total windows: {total}",
+                text=f"detected: {now_str}  ({raw_str})    [{counts_str}]    windows: {total}",
                 fill="#ffffff",
             )
 
@@ -274,9 +296,13 @@ class SSVEPFlickerApp:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SSVEP 2-box flicker with BrainFlow detection.")
-    parser.add_argument("--board-id", type=int, default=int(BoardIds.SYNTHETIC_BOARD))
-    parser.add_argument("--no-eeg", action="store_true")
+    parser = argparse.ArgumentParser(description="SSVEP 2-box flicker — Neuropawn Knight.")
+    parser.add_argument("--serial-port", type=str, default="COM3",
+                        help="Serial port for the Neuropawn Knight (default: COM3).")
+    parser.add_argument("--channels", type=int, default=8,
+                        help="Number of EEG channels to activate (default: 8).")
+    parser.add_argument("--no-eeg", action="store_true",
+                        help="Run visual stimulus only, no board needed.")
     args = parser.parse_args()
 
     state = FlickerState()
@@ -286,7 +312,7 @@ def main() -> None:
     if not args.no_eeg:
         eeg_thread = threading.Thread(
             target=eeg_analysis_thread,
-            args=(state, args.board_id, stop_event),
+            args=(state, stop_event, args.serial_port, args.channels),
             daemon=True,
         )
         eeg_thread.start()
@@ -299,7 +325,7 @@ def main() -> None:
     finally:
         stop_event.set()
         if eeg_thread is not None:
-            eeg_thread.join(timeout=3.0)
+            eeg_thread.join(timeout=5.0)
 
 
 if __name__ == "__main__":
