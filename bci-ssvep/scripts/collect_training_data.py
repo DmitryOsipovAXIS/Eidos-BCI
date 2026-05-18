@@ -4,6 +4,8 @@ Usage:
   python scripts/collect_training_data.py --serial-port COM4
   python scripts/collect_training_data.py --no-eeg   # visual test only
   python scripts/collect_training_data.py --trials 20
+  python scripts/collect_training_data.py --fullscreen  !!!!
+
 """
 from __future__ import annotations
 
@@ -57,6 +59,7 @@ def main() -> None:
     parser.add_argument("--serial-port", default="COM4")
     parser.add_argument("--trials", type=int, default=20, help="Trials per class")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
+    parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen stimulus window")
     args = parser.parse_args()
 
     config = SSVEPConfig()
@@ -88,8 +91,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     pygame.init()
     info = pygame.display.Info()
-    W, H = info.current_w, info.current_h
-    screen = pygame.display.set_mode((W, H), pygame.FULLSCREEN)
+    if args.fullscreen:
+        W, H = info.current_w, info.current_h
+        screen = pygame.display.set_mode((W, H), pygame.FULLSCREEN)
+    else:
+        W, H = int(info.current_w * 0.9), int(info.current_h * 0.9)
+        screen = pygame.display.set_mode((W, H), pygame.RESIZABLE)
     pygame.display.set_caption("SSVEP Training")
     clock = pygame.time.Clock()
 
