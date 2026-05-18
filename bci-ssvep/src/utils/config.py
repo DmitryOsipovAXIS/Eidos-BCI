@@ -19,7 +19,7 @@ class SSVEPConfig:
     """
 
     left_hz: float = 10.0
-    right_hz: float = 15.0
+    right_hz: float = 20.0
     bandpass_margin_hz: float = 2.0
     window_seconds: float = 2.0
     project_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
