@@ -22,6 +22,7 @@ class SSVEPConfig:
     right_hz: float = 15.0
     bandpass_margin_hz: float = 2.0
     window_seconds: float = 4.0
+    sample_rate_hz: float = 125.0
     project_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
 
     @property

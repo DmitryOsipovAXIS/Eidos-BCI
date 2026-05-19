@@ -37,7 +37,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = SSVEPConfig()
-    fs = 250.0
+    fs = config.sample_rate_hz
 
     if args.file:
         x_path = Path(args.file)
