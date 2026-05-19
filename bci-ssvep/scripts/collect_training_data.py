@@ -78,7 +78,7 @@ def main() -> None:
         stream.prepare_session()
         stream.start_stream()
         time.sleep(2)
-        for ch in range(1, args.num_channels + 1):
+        for ch in range(1, 9):
             time.sleep(0.5); stream.board.config_board(f"chon_{ch}_12")
             time.sleep(1);   stream.board.config_board(f"rldadd_{ch}")
             time.sleep(0.5)
