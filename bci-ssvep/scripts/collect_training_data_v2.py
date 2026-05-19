@@ -42,11 +42,17 @@ BLUE = (80, 120, 255)
 RED = (255, 80, 80)
 
 
-def _record(stream, label: int, result: dict, start_event: threading.Event) -> None:
+def _record(
+    stream,
+    label: int,
+    result: dict,
+    start_event: threading.Event,
+    record_seconds: float,
+) -> None:
     from acquisition.brainflow_stream import collect_labeled_window
     try:
-        start_event.wait(timeout=RECORD_S + 2)
-        eeg, lbl = collect_labeled_window(stream, label, RECORD_S, DISCARD_S)
+        start_event.wait(timeout=record_seconds + 2)
+        eeg, lbl = collect_labeled_window(stream, label, record_seconds, DISCARD_S)
         result["eeg"] = eeg
         result["label"] = lbl
     except Exception as e:
@@ -66,11 +72,13 @@ def _set_mode(size: tuple[int, int], fullscreen: bool) -> pygame.Surface:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--serial-port", default="COM4")
-    parser.add_argument("--trials", type=int, default=20, help="Total trials (left+right)")
+    parser.add_argument("--trials", type=int, default=15, help="Total trials (left+right)")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
     parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen window")
     parser.add_argument("--monitor-hz", type=float, default=DEFAULT_MONITOR_HZ,
                         help="Monitor refresh rate (default 60)")
+    parser.add_argument("--record-seconds", type=float, default=RECORD_S,
+                        help="Flicker/record duration per trial in seconds")
     parser.add_argument("--left-hz", type=float, default=10.0, help="Left box frequency")
     parser.add_argument("--right-hz", type=float, default=15.0, help="Right box frequency")
     parser.add_argument("--num-channels", type=int, default=4, help="Number of EEG channels")
@@ -212,14 +220,14 @@ def main() -> None:
         if stream is not None:
             t = threading.Thread(
                 target=_record,
-                args=(stream, label, result, start_event),
+                args=(stream, label, result, start_event, args.record_seconds),
                 daemon=True,
             )
             t.start()
         else:
             t = None
 
-        end = pygame.time.get_ticks() + int(RECORD_S * 1000)
+        end = pygame.time.get_ticks() + int(args.record_seconds * 1000)
         frames = 0
         started = False
         while pygame.time.get_ticks() < end:
@@ -261,7 +269,7 @@ def main() -> None:
             frames += 1
 
         if t is not None:
-            t.join(timeout=RECORD_S + 2)
+            t.join(timeout=args.record_seconds + 2)
             if "error" in result:
                 print(f"  Trial {idx + 1} error: {result['error']}", flush=True)
             elif "eeg" in result:
