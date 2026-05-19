@@ -68,7 +68,7 @@ def main() -> None:
     for ax, trials, label, color in zip(
         axes,
         [left_trials, right_trials],
-        ["LEFT (10 Hz)", "RIGHT (15 Hz)"],
+        [f"LEFT ({config.left_hz} Hz)", f"RIGHT ({config.right_hz} Hz)"],
         ["steelblue", "tomato"],
     ):
         psds = []
@@ -88,10 +88,10 @@ def main() -> None:
         ax.fill_between(f, mean_psd - std_psd, mean_psd + std_psd,
                         alpha=0.2, color=color)
         ax.axvline(config.left_hz,  color="steelblue", linestyle="--",
-                   alpha=0.7, label=f"{config.left_hz:.0f} Hz (left target)")
+                   alpha=0.7, label=f"{config.left_hz} Hz (left target)")
         ax.axvline(config.right_hz, color="tomato",    linestyle="--",
-                   alpha=0.7, label=f"{config.right_hz:.0f} Hz (right target)")
-        ax.set_xlim(5, 30)
+                   alpha=0.7, label=f"{config.right_hz} Hz (right target)")
+        ax.set_xlim(2, 20)
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylabel("Power (log scale)")
         ax.set_title(label)
@@ -106,7 +106,7 @@ def main() -> None:
     fig2, axes2 = plt.subplots(n_ch, 2, figsize=(14, n_ch * 1.4), sharex=True)
     fig2.suptitle("Raw EEG — example LEFT trial (left) vs RIGHT trial (right)", fontsize=13)
 
-    ch_names = ["PO3", "POz", "PO4", "PO7", "O7", "Oz", "O2", "PO8"]
+    ch_names = ["POz", "O1", "Oz", "O2"]
 
     for ci in range(n_ch):
         for col, (trial, color) in enumerate(zip(
@@ -143,8 +143,8 @@ def main() -> None:
                 color="steelblue", label="LEFT",  alpha=0.7, s=60)
     ax3.scatter(feats[y==1, 0], feats[y==1, 1],
                 color="tomato",    label="RIGHT", alpha=0.7, s=60)
-    ax3.set_xlabel(f"log power @ {config.left_hz:.0f} Hz")
-    ax3.set_ylabel(f"log power @ {config.right_hz:.0f} Hz")
+    ax3.set_xlabel(f"log power @ {config.left_hz} Hz")
+    ax3.set_ylabel(f"log power @ {config.right_hz} Hz")
     ax3.set_title("Feature space — are LEFT and RIGHT separable?")
     ax3.legend()
     ax3.grid(True, alpha=0.3)

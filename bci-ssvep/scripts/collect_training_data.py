@@ -40,10 +40,6 @@ BLUE  = (80,  120, 255)
 RED   = (255, 80,  80)
 
 
-def half_period(hz: float) -> int:
-    return round(MONITOR_HZ / hz / 2)
-
-
 def _record(stream, label: int, result: dict) -> None:
     from acquisition.brainflow_stream import collect_labeled_window
     try:
@@ -60,11 +56,12 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=20, help="Trials per class")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
     parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen stimulus window")
+    parser.add_argument("--left-hz",      type=float, default=10.0, help="Left box frequency (default 10.0)")
+    parser.add_argument("--right-hz",     type=float, default=15.0, help="Right box frequency (default 15.0)")
+    parser.add_argument("--num-channels", type=int,   default=4,    help="Number of EEG channels (default 4)")
     args = parser.parse_args()
 
-    config = SSVEPConfig()
-    lhp = half_period(config.left_hz)   # 3 frames at 60 Hz → 10 Hz
-    rhp = half_period(config.right_hz)  # 2 frames at 60 Hz → 15 Hz
+    config = SSVEPConfig(left_hz=args.left_hz, right_hz=args.right_hz)
 
     # ------------------------------------------------------------------
     # Board init
@@ -76,11 +73,12 @@ def main() -> None:
         BoardShim.disable_board_logger()
         p = BrainFlowInputParams()
         p.serial_port = args.serial_port
-        stream = BrainFlowStream(board_id=BoardIds.NEUROPAWN_KNIGHT_BOARD.value, params=p)
+        stream = BrainFlowStream(board_id=BoardIds.NEUROPAWN_KNIGHT_BOARD.value, params=p,
+                                 num_channels=args.num_channels)
         stream.prepare_session()
         stream.start_stream()
         time.sleep(2)
-        for ch in range(1, 9):
+        for ch in range(1, args.num_channels + 1):
             time.sleep(0.5); stream.board.config_board(f"chon_{ch}_12")
             time.sleep(1);   stream.board.config_board(f"rldadd_{ch}")
             time.sleep(0.5)
@@ -175,15 +173,23 @@ def main() -> None:
         else:
             t = None
 
-        frame = 0
+        left_phase  = 0.0
+        right_phase = 0.0
+        last_t = time.perf_counter()
         end = pygame.time.get_ticks() + int(RECORD_S * 1000)
         while pygame.time.get_ticks() < end:
             for e in pygame.event.get():
                 if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
                     running = False
 
-            left_on  = (frame // lhp) % 2 == 0
-            right_on = (frame // rhp) % 2 == 0
+            now = time.perf_counter()
+            dt  = now - last_t
+            last_t = now
+            left_phase  = (left_phase  + config.left_hz  * dt) % 1.0
+            right_phase = (right_phase + config.right_hz * dt) % 1.0
+
+            left_on  = left_phase  < 0.5
+            right_on = right_phase < 0.5
 
             screen.fill(BG)
             blit_c(f"FOCUS  {side}", col, True, W // 2, H // 8)
@@ -198,7 +204,6 @@ def main() -> None:
 
             pygame.display.flip()
             clock.tick(MONITOR_HZ)
-            frame += 1
 
         if t is not None:
             t.join(timeout=RECORD_S + 2)

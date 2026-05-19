@@ -18,10 +18,10 @@ class SSVEPConfig:
         project_root: Root of the ``bci-ssvep`` project (parent of ``src``).
     """
 
-    left_hz: float = 10.0
-    right_hz: float = 20.0
+    left_hz: float = 7.5
+    right_hz: float = 12.0
     bandpass_margin_hz: float = 2.0
-    window_seconds: float = 2.0
+    window_seconds: float = 4.0
     project_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
 
     @property
