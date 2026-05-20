@@ -186,7 +186,8 @@ class LiveMetrics:
             qw = "OK" if self.quality_ok else "LOW"
             line1 = f"NCCA @ {f:.0f} Hz: {sc}  (quality {qw}, thresh {NCCA_QUALITY_THRESHOLD:.1f})"
             line2 = f"Welch peak {PEAK_SEARCH_HZ[0]:.0f}–{PEAK_SEARCH_HZ[1]:.0f} Hz: {ph} Hz  |  dashed line = stim"
-            return f"{line1}\n{line2}\n{self.note}"
+            decision = f">>> DETECTED: {f:.0f} Hz <<<" if self.quality_ok else ">>> NO DETECTION <<<"
+            return f"{line1}\n{line2}\n{decision}\n{self.note}"
 
     def spectrum_snapshot(self) -> tuple[np.ndarray | None, np.ndarray | None]:
         with self.lock:
