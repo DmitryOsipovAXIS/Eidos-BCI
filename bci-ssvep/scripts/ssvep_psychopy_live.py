@@ -1,22 +1,21 @@
-"""Dual-target SSVEP demo: PsychoPy flicker + live NCCA (BrainFlow, SciPy, sklearn).
+"""Single-target SSVEP: PsychoPy flicker + live NCCA + spectrum plot (BrainFlow, SciPy).
 
-Two full-contrast flickering targets (default 10 Hz and 15 Hz, divisors of 60 Hz) for
-binary SSVEP; occipital montage (e.g. O1, O2, Oz, POz on first four channels, or full
-8-channel Knight). Real-time pipeline uses **causal** ``sosfilt`` (SciPy) and
-**NCCA** normalized CCA (Kartsch et al., Sensors 2022, doi:10.3390/s22249803).
+One full-contrast flashing target whose rate is ``--flicker-hz`` (good choices on a 60 Hz
+monitor: e.g. 10, 12, 15, 20 Hz). A Matplotlib window shows the average-channel Welch PSD
+(last analysis window); a dashed line marks the stimulus frequency so you can see visually
+whether occipital power lines up.
 
-Dependencies: PsychoPy, BrainFlow (Neuropawn Knight), SciPy, scikit-learn.
+Real-time EEG: causal ``sosfilt`` bandpass 0.5–32 Hz, 50 Hz notch, NCCA (Kartsch et al.,
+Sensors 2022, doi:10.3390/s22249803).
 
 Usage (from ``bci-ssvep``):
 
   python scripts/ssvep_psychopy_live.py --serial-port COM4
-  python scripts/ssvep_psychopy_live.py --fullscreen --num-channels 8
-  python scripts/ssvep_psychopy_live.py --no-eeg   # stimulus only
+  python scripts/ssvep_psychopy_live.py --flicker-hz 10 --fullscreen
+  python scripts/ssvep_psychopy_live.py --no-eeg
 
-``--flicker-hz`` is kept for CLI compatibility; this script uses fixed **10 Hz** and
-**15 Hz** targets for classification and on-screen flicker.
+Quit stimulus: Escape. Close spectrum window or Ctrl+C stops the spectrum thread when you exit.
 
-Quit: Escape (or Alt+F4 on Windows).
 """
 
 from __future__ import annotations
@@ -27,9 +26,13 @@ import threading
 import time
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("TkAgg")  # separate spectrum window alongside PsychoPy
+import matplotlib.pyplot as plt
 import numpy as np
 from psychopy import core, event, visual
-from scipy.signal import butter, iirnotch, sosfilt, tf2sos
+from scipy.signal import butter, iirnotch, sosfilt, tf2sos, welch as scipy_welch
 from sklearn.cross_decomposition import CCA
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,19 +44,16 @@ from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
 
 from acquisition.brainflow_stream import BrainFlowStream
 
-# --- SSVEP targets (incommensurable pair; 15 is not a harmonic of 10) ------------
-SSVEP_FREQS: tuple[float, float] = (10.0, 15.0)
-
 ANALYSIS_INTERVAL_S = 0.35
 WINDOW_SECONDS = 4.0
 MONITOR_HZ_FALLBACK = 60
 
-# NCCA neighbour spacing (Hz) and detection threshold (paper / expert suggestion)
 NCCA_DELTA_HZ = 0.2
 NCCA_QUALITY_THRESHOLD = 1.2
-
-# Reference signal harmonics for CCA (fundamental + harmonics)
 N_HARMONICS_DEFAULT = 2
+
+# PSD plot band (Hz) for “where is the peak?” hint on HUD
+PEAK_SEARCH_HZ = (5.0, 29.0)
 
 
 # =============================================================================
@@ -62,18 +62,11 @@ N_HARMONICS_DEFAULT = 2
 
 
 def design_filter_sos(fs: float) -> tuple[np.ndarray, np.ndarray]:
-    """Design SOS sections for bandpass (0.5–32 Hz) and notch (50 Hz).
-
-    Bandpass limits slow drift and high-frequency noise while keeping SSVEP band.
-    European mains: notch at 50 Hz (applied before bandpass so line is attenuated
-    even when passband overlaps line harmonics conceptually — here passband ends at
-    32 Hz, but notch-first is conventional for EEG preprocessing chains).
-    """
+    """Design SOS for 50 Hz notch + 0.5–32 Hz bandpass (causal ``sosfilt`` chain)."""
     if fs <= 0:
         raise ValueError("Sampling rate must be positive.")
     nyq = fs / 2.0
 
-    # Notch 50 Hz (Q ~ 35: reasonable trade-off between width and stability)
     b_n, a_n = iirnotch(w0=50.0, Q=35.0, fs=fs)
     sos_notch = tf2sos(b_n, a_n)
 
@@ -87,10 +80,9 @@ def design_filter_sos(fs: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def filter_eeg_realtime(eeg: np.ndarray, sos_notch: np.ndarray, sos_band: np.ndarray) -> np.ndarray:
-    """Apply causal IIR filtering along time (axis=1). EEG shape (n_channels, n_samples)."""
+    """Notch then bandpass along time (axis=1)."""
     if eeg.ndim != 2:
         raise ValueError("eeg must be 2-D (channels x samples).")
-    # Notch then bandpass; sosfilt is causal (no filtfilt / zero-phase)
     x = sosfilt(sos_notch, eeg, axis=-1)
     x = sosfilt(sos_band, x, axis=-1)
     return x
@@ -102,7 +94,6 @@ def filter_eeg_realtime(eeg: np.ndarray, sos_notch: np.ndarray, sos_band: np.nda
 
 
 def make_reference(freq: float, sfreq: float, n_samples: int, n_harmonics: int = 2) -> np.ndarray:
-    """Sin/cos reference per harmonic; shape (n_samples, 2 * n_harmonics)."""
     t = np.arange(n_samples, dtype=np.float64) / float(sfreq)
     cols = []
     for h in range(1, n_harmonics + 1):
@@ -113,7 +104,6 @@ def make_reference(freq: float, sfreq: float, n_samples: int, n_harmonics: int =
 
 
 def compute_cca(eeg: np.ndarray, freq: float, sfreq: float, n_harmonics: int = N_HARMONICS_DEFAULT) -> float:
-    """First canonical correlation between multi-channel EEG and sin/cos reference."""
     _, n_s = eeg.shape
     if n_s < 2 * (n_harmonics + eeg.shape[0]):
         return 0.0
@@ -139,7 +129,6 @@ def compute_cca(eeg: np.ndarray, freq: float, sfreq: float, n_harmonics: int = N
 
 
 def compute_ncca(eeg: np.ndarray, freq: float, sfreq: float, delta: float = NCCA_DELTA_HZ) -> float:
-    """Normalized CCA: rho(f) / mean(rho(f+delta), rho(f-delta))."""
     c0 = compute_cca(eeg, freq, sfreq)
     cp = compute_cca(eeg, freq + delta, sfreq)
     cm = compute_cca(eeg, freq - delta, sfreq)
@@ -149,68 +138,66 @@ def compute_ncca(eeg: np.ndarray, freq: float, sfreq: float, delta: float = NCCA
     return float(c0 / denom)
 
 
-def classify_ssvep(
-    eeg_window: np.ndarray,
-    freqs: tuple[float, ...],
-    sfreq: float,
-    delta: float = NCCA_DELTA_HZ,
-) -> tuple[float, dict[float, float], dict[float, float]]:
-    """Return winner, HUD-safe scores (capped), and raw NCCA (for thresholding)."""
-    scores_raw: dict[float, float] = {}
-    scores_hud: dict[float, float] = {}
-    for f in freqs:
-        v = compute_ncca(eeg_window, f, sfreq, delta=delta)
-        scores_raw[f] = v
-        if np.isinf(v) and v > 0:
-            scores_hud[f] = 99.99
-        elif not np.isfinite(v):
-            scores_hud[f] = 0.0
-        else:
-            scores_hud[f] = float(min(v, 99.99))
-    best = max(freqs, key=lambda fr: (scores_raw[fr] if np.isfinite(scores_raw[fr]) else float("inf")))
-    return best, scores_hud, scores_raw
-
-
-# =============================================================================
-# EEG thread + BrainFlow
-# =============================================================================
-
-
 class LiveMetrics:
-    """Thread-safe NCCA summary for HUD."""
+    """HUD + spectrum plot snapshots (single target frequency)."""
 
-    def __init__(self) -> None:
+    def __init__(self, target_hz: float) -> None:
         self.lock = threading.Lock()
-        self.scores: dict[float, float] = {}
-        self.winner: float | None = None
+        self.target_hz = float(target_hz)
+        self.score_hud: float = float("nan")
         self.quality_ok: bool = False
+        self.peak_hz: float = float("nan")
         self.note: str = ""
+        self.spec_f: np.ndarray | None = None
+        self.spec_p: np.ndarray | None = None
 
-    def update(self, scores: dict[float, float], winner: float, quality_ok: bool, note: str) -> None:
+    def update(
+        self,
+        *,
+        score_hud: float,
+        quality_ok: bool,
+        peak_hz: float,
+        spec_f: np.ndarray,
+        spec_p: np.ndarray,
+        note: str,
+    ) -> None:
         with self.lock:
-            self.scores = dict(scores)
-            self.winner = winner
+            self.score_hud = score_hud
             self.quality_ok = quality_ok
+            self.peak_hz = peak_hz
             self.note = note[:200]
+            self.spec_f = spec_f.astype(np.float64).copy()
+            self.spec_p = spec_p.astype(np.float64).copy()
 
     def label(self) -> str:
         with self.lock:
-            if not self.scores:
-                return self.note or "…"
-            parts = [f"NCCA {f:.0f}Hz: {self.scores.get(f, float('nan')):.2f}" for f in sorted(self.scores)]
-            line1 = "  |  ".join(parts)
-            w = self.winner
+            f = self.target_hz
+            s = (
+                float(self.score_hud)
+                if np.isfinite(self.score_hud)
+                else float("nan")
+            )
+            sc = "—" if not np.isfinite(s) else f"{s:.2f}"
+            ph = (
+                "—"
+                if not np.isfinite(self.peak_hz)
+                else f"{self.peak_hz:.1f}"
+            )
             qw = "OK" if self.quality_ok else "LOW"
-            if w is not None and np.isfinite(self.scores.get(w, float("nan"))):
-                line2 = f"→ DETECTED: {w:.0f} Hz  (quality {qw}, threshold {NCCA_QUALITY_THRESHOLD:.1f})"
-            else:
-                line2 = f"→ DETECTED: —  (quality {qw})"
+            line1 = f"NCCA @ {f:.0f} Hz: {sc}  (quality {qw}, thresh {NCCA_QUALITY_THRESHOLD:.1f})"
+            line2 = f"Welch peak {PEAK_SEARCH_HZ[0]:.0f}–{PEAK_SEARCH_HZ[1]:.0f} Hz: {ph} Hz  |  dashed line = stim"
             return f"{line1}\n{line2}\n{self.note}"
+
+    def spectrum_snapshot(self) -> tuple[np.ndarray | None, np.ndarray | None]:
+        with self.lock:
+            if self.spec_f is None or self.spec_p is None:
+                return None, None
+            return self.spec_f.copy(), self.spec_p.copy()
 
 
 def _eeg_loop(
     stream: BrainFlowStream,
-    freqs: tuple[float, float],
+    target_hz: float,
     metrics: LiveMetrics,
     stop_evt: threading.Event,
 ) -> None:
@@ -227,18 +214,80 @@ def _eeg_loop(
         eeg = raw[eeg_ix, :].astype(np.float64)
 
         eeg_f = filter_eeg_realtime(eeg, sos_notch, sos_band)
-        winner, scores_hud, scores_raw = classify_ssvep(eeg_f, freqs, fs, delta=NCCA_DELTA_HZ)
 
-        w_raw = scores_raw.get(winner, 0.0)
-        if np.isnan(w_raw):
+        v_raw = compute_ncca(eeg_f, target_hz, fs, delta=NCCA_DELTA_HZ)
+        if np.isinf(v_raw) and v_raw > 0:
+            score_hud = 99.99
+        elif not np.isfinite(v_raw):
+            score_hud = 0.0
+        else:
+            score_hud = float(min(v_raw, 99.99))
+
+        if np.isnan(v_raw):
             quality_ok = False
-        elif np.isinf(w_raw) and w_raw > 0:
+        elif np.isinf(v_raw) and v_raw > 0:
             quality_ok = True
         else:
-            quality_ok = w_raw > NCCA_QUALITY_THRESHOLD
+            quality_ok = v_raw > NCCA_QUALITY_THRESHOLD
 
-        note = f"causal SOS 0.5–32 Hz + 50 Hz notch  |  win={win_n} @ {fs:.0f} Hz"
-        metrics.update(scores_hud, winner, quality_ok, note)
+        sig_avg = np.mean(eeg_f, axis=0)
+        n_seg = int(min(fs * 2, sig_avg.shape[-1]))
+        n_seg = max(128, n_seg - (n_seg % 2))
+        fq, pw = scipy_welch(sig_avg, fs=fs, nperseg=n_seg, noverlap=n_seg // 2)
+
+        pf_lo, pf_hi = PEAK_SEARCH_HZ
+        m = (fq >= pf_lo) & (fq <= pf_hi)
+        if np.any(m):
+            jj = int(np.argmax(pw[m]))
+            peak_hz = float(fq[m][jj])
+        else:
+            peak_hz = float("nan")
+
+        note = f"SOS 0.5–32 Hz + 50 Hz notch  ·  Welch nperseg={n_seg}  ·  {WINDOW_SECONDS}s window"
+        metrics.update(
+            score_hud=score_hud,
+            quality_ok=quality_ok,
+            peak_hz=peak_hz,
+            spec_f=fq,
+            spec_p=pw,
+            note=note,
+        )
+
+
+def _spectrum_plot_loop(target_hz: float, metrics: LiveMetrics, stop_evt: threading.Event) -> None:
+    """Refresh a small PSD plot from shared metrics."""
+    fig, ax = plt.subplots(figsize=(7.5, 3.8))
+    fig.patch.set_facecolor("#1a1a1a")
+    ax.set_facecolor("#252525")
+    ax.tick_params(colors="gray")
+    ax.spines[["bottom", "top", "left", "right"]].set_color("gray")
+    ax.set_title("Average-channel PSD — look for a bump near the red line", color="silver", fontsize=10)
+    fig.canvas.manager.set_window_title("SSVEP spectrum")
+
+    while not stop_evt.is_set():
+        time.sleep(max(ANALYSIS_INTERVAL_S, 0.2))
+        fq, pw = metrics.spectrum_snapshot()
+        if fq is None or pw is None:
+            continue
+
+        ax.clear()
+        ax.set_facecolor("#252525")
+        ax.tick_params(colors="gray")
+        for s in ax.spines.values():
+            s.set_color("gray")
+        ax.semilogy(fq, np.maximum(pw, 1e-20), color="cyan", lw=1.0)
+        ax.axvline(target_hz, color="tomato", ls="--", lw=2, label=f"{target_hz:g} Hz (stimulus)")
+        ax.set_xlim(2.0, 35.0)
+        ax.set_xlabel("Frequency (Hz)", color="silver")
+        ax.set_ylabel("PSD", color="silver")
+        ax.legend(loc="upper right", fontsize=9, framealpha=0.35)
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+
+        if not plt.fignum_exists(fig.number):
+            break
+
+    plt.close(fig)
 
 
 def _prepare_knight(serial_port: str, num_channels: int) -> BrainFlowStream:
@@ -267,48 +316,54 @@ def _prepare_knight(serial_port: str, num_channels: int) -> BrainFlowStream:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="PsychoPy dual-target SSVEP + live NCCA (SciPy filters, sklearn CCA).",
+        description="PsychoPy single-target SSVEP + NCCA + live spectrum.",
     )
     parser.add_argument("--serial-port", default="COM4")
     parser.add_argument(
         "--flicker-hz",
         type=float,
-        default=12.0,
-        help="Reserved for CLI compatibility; stimuli use fixed 10 Hz and 15 Hz.",
+        default=10.0,
+        help="Stimulus flicker (Hz); on 60 Hz, 10 / 12 / 15 / 20 work cleanly.",
     )
     parser.add_argument(
         "--monitor-hz",
         type=float,
         default=MONITOR_HZ_FALLBACK,
-        help="Fallback dt (s) if frame clock yields non-positive delta.",
+        help="Fallback dt if frame clock yields non-positive delta.",
     )
     parser.add_argument("--fullscreen", action="store_true")
     parser.add_argument("--num-channels", type=int, default=8)
     parser.add_argument("--no-eeg", action="store_true", help="Stimulus without BrainFlow.")
 
     args = parser.parse_args()
-    _ = args.flicker_hz  # kept for argparse compatibility (fixed 10/15 Hz stimuli)
-
-    f_lo, f_hi = SSVEP_FREQS
+    target_hz = args.flicker_hz
 
     stop_evt = threading.Event()
-    metrics = LiveMetrics()
+    metrics = LiveMetrics(target_hz)
     stream: BrainFlowStream | None = None
-    tid: threading.Thread | None = None
+    tid_eeg: threading.Thread | None = None
+    tid_plot: threading.Thread | None = None
 
     if not args.no_eeg:
         stream = _prepare_knight(args.serial_port, args.num_channels)
-        tid = threading.Thread(
+        tid_eeg = threading.Thread(
             target=_eeg_loop,
             kwargs={
                 "stream": stream,
-                "freqs": SSVEP_FREQS,
+                "target_hz": target_hz,
                 "metrics": metrics,
                 "stop_evt": stop_evt,
             },
             daemon=True,
         )
-        tid.start()
+        tid_eeg.start()
+
+        tid_plot = threading.Thread(
+            target=_spectrum_plot_loop,
+            args=(target_hz, metrics, stop_evt),
+            daemon=True,
+        )
+        tid_plot.start()
 
     win = visual.Window(
         fullscr=args.fullscreen,
@@ -317,21 +372,20 @@ def main() -> None:
         waitBlanking=True,
     )
 
-    stim_left = visual.Rect(win, width=0.36, height=0.34, pos=(-0.42, 0.06))
-    stim_right = visual.Rect(win, width=0.36, height=0.34, pos=(0.42, 0.06))
-
+    stimulus = visual.Rect(win, width=0.4, height=0.38, pos=(0.0, 0.08))
     title = visual.TextStim(
         win,
-        text="Look at LEFT (10 Hz) or RIGHT (15 Hz) target",
+        text="Focus the flashing square — check spectrum window vs red line",
         height=0.055,
         pos=(0.0, 0.82),
         color=(0.85, 0.85, 0.85),
     )
-    lab_left = visual.TextStim(
-        win, text=f"{f_lo:.0f} Hz", height=0.06, pos=(-0.42, -0.22), color=(0.4, 0.75, 1.0)
-    )
-    lab_right = visual.TextStim(
-        win, text=f"{f_hi:.0f} Hz", height=0.06, pos=(0.42, -0.22), color=(1.0, 0.55, 0.45)
+    hz_label = visual.TextStim(
+        win,
+        text=f"{target_hz:.1f} Hz",
+        height=0.075,
+        pos=(0.0, -0.26),
+        color=(0.35, 0.85, 1.0),
     )
     hint = visual.TextStim(
         win,
@@ -340,14 +394,13 @@ def main() -> None:
         pos=(0.0, -0.88),
         color=(0.5, 0.5, 0.5),
     )
-    status = visual.TextStim(win, text="", height=0.032, pos=(0.0, -0.52), wrapWidth=1.85)
+    status = visual.TextStim(win, text="", height=0.032, pos=(0.0, -0.50), wrapWidth=1.85)
 
     if args.no_eeg:
         status.text = "(EEG offline — flicker demo only)"
 
     clock = core.Clock()
-    phase_left = 0.0
-    phase_right = 0.0
+    phase_acc = 0.0
     clock.reset()
 
     try:
@@ -359,20 +412,16 @@ def main() -> None:
             dt = clock.getTime()
             clock.reset()
             dt = dt if dt > 0 else 1.0 / args.monitor_hz
-            phase_left = (phase_left + f_lo * dt) % 1.0
-            phase_right = (phase_right + f_hi * dt) % 1.0
+            phase_acc = (phase_acc + target_hz * dt) % 1.0
 
-            stim_left.fillColor = (1, 1, 1) if phase_left < 0.5 else (-1, -1, -1)
-            stim_right.fillColor = (1, 1, 1) if phase_right < 0.5 else (-1, -1, -1)
+            stimulus.fillColor = (1, 1, 1) if phase_acc < 0.5 else (-1, -1, -1)
 
             if not args.no_eeg:
                 status.text = metrics.label()
 
             title.draw()
-            lab_left.draw()
-            lab_right.draw()
-            stim_left.draw()
-            stim_right.draw()
+            hz_label.draw()
+            stimulus.draw()
             status.draw()
             hint.draw()
             win.flip()
@@ -381,8 +430,15 @@ def main() -> None:
         win.close()
         core.quit()
 
-        if tid is not None:
-            tid.join(timeout=WINDOW_SECONDS)
+        if tid_eeg is not None:
+            tid_eeg.join(timeout=WINDOW_SECONDS)
+        if tid_plot is not None:
+            tid_plot.join(timeout=2.0)
+
+        try:
+            plt.close("all")
+        except Exception:
+            pass
 
         if stream is not None:
             try:
