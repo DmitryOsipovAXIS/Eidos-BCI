@@ -28,7 +28,7 @@ if str(ROOT / "src") not in sys.path:
 from utils.config import SSVEPConfig
 
 DEFAULT_MONITOR_HZ = 60
-RECORD_S = 4.0
+RECORD_S = 30.0
 REST_S = 2.0
 CUE_S = 0.6
 ITI_S = 1.0
@@ -79,6 +79,8 @@ def main() -> None:
                         help="Monitor refresh rate (default 60)")
     parser.add_argument("--record-seconds", type=float, default=RECORD_S,
                         help="Flicker/record duration per trial in seconds")
+    parser.add_argument("--no-start-screen", action="store_true",
+                        help="Skip trial selection start screen")
     parser.add_argument("--left-hz", type=float, default=10.0, help="Left box frequency")
     parser.add_argument("--right-hz", type=float, default=15.0, help="Right box frequency")
     parser.add_argument("--num-channels", type=int, default=4, help="Number of EEG channels")
@@ -158,7 +160,47 @@ def main() -> None:
                else [(cx - sz, cy_ - sz // 2), (cx + sz, cy_), (cx - sz, cy_ + sz // 2)])
         pygame.draw.polygon(screen, color, pts)
 
+    def pick_trials() -> int | None:
+        choices = [("1x", 1), ("10x", 10), ("20x", 20)]
+        btn_w, btn_h = int(W * 0.18), int(H * 0.12)
+        gap = int(W * 0.04)
+        total_w = len(choices) * btn_w + (len(choices) - 1) * gap
+        start_x = (W - total_w) // 2
+        y = int(H * 0.55)
+        rects = []
+        for i in range(len(choices)):
+            rects.append(pygame.Rect(start_x + i * (btn_w + gap), y, btn_w, btn_h))
+
+        while True:
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    return None
+                if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+                    return None
+                if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    for rect, (_, val) in zip(rects, choices):
+                        if rect.collidepoint(e.pos):
+                            return val
+
+            screen.fill(BG)
+            blit_c("Select trials", GREY, True, W // 2, H // 4)
+            blit_c(f"Record {args.record_seconds:.0f}s per trial", GREY, False, W // 2, H // 3)
+            for rect, (label, _) in zip(rects, choices):
+                pygame.draw.rect(screen, DIM, rect, border_radius=8)
+                pygame.draw.rect(screen, GREY, rect, 2, border_radius=8)
+                blit_c(label, WHITE, True, rect.centerx, rect.centery)
+            pygame.display.flip()
+            clock.tick(args.monitor_hz)
+
     # ------------------------------------------------------------------
+    # Trial selection screen
+    if not args.no_start_screen:
+        selected = pick_trials()
+        if selected is None:
+            pygame.quit()
+            return
+        args.trials = selected
+
     # Trial sequence: interleaved LEFT / RIGHT
     # ------------------------------------------------------------------
     per_class = max(1, args.trials // 2)

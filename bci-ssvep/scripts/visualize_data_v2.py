@@ -38,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--left-hz", type=float, default=None, help="Left target frequency")
     parser.add_argument("--right-hz", type=float, default=None, help="Right target frequency")
     parser.add_argument("--sample-rate", type=float, default=None, help="Sampling rate in Hz")
-    parser.add_argument("--record-seconds", type=float, default=4.0,
-                        help="Total recording seconds per trial (default 4.0)")
+    parser.add_argument("--record-seconds", type=float, default=30.0,
+                        help="Total recording seconds per trial (default 30.0)")
     parser.add_argument("--discard-seconds", type=float, default=0.5,
                         help="Discard seconds at trial start (default 0.5)")
     parser.add_argument("--bandpass-low", type=float, default=None, help="Bandpass low cutoff")
@@ -84,11 +84,24 @@ def main() -> None:
         fs = n_samples / kept_s
         fs_note = "(inferred from samples)"
 
+        nyq_ok = fs >= (2.0 * max(left_hz, right_hz) + 1.0)
+        if not nyq_ok and args.record_seconds != 4.0:
+            fallback_s = max(1e-6, 4.0 - args.discard_seconds)
+            fallback_fs = n_samples / fallback_s
+            if fallback_fs >= (2.0 * max(left_hz, right_hz) + 1.0):
+                fs = fallback_fs
+                fs_note = "(auto: assumed 4s trials)"
+
     if args.bandpass_low is not None and args.bandpass_high is not None:
         low, high = float(args.bandpass_low), float(args.bandpass_high)
     else:
-        low = max(min(left_hz, right_hz) - config.bandpass_margin_hz, 0.5)
-        high = max(left_hz, right_hz) + config.bandpass_margin_hz
+        low = max(min(left_hz, right_hz) - config.bandpass_margin_hz, config.bandpass_low_hz)
+        high = min(max(left_hz, right_hz) + config.bandpass_margin_hz, config.bandpass_high_hz)
+
+    nyq = 0.5 * fs
+    if high >= nyq:
+        high = max(low + 0.1, 0.95 * nyq)
+        print(f"Adjusted bandpass high to {high:0.2f} Hz to respect Nyquist")
 
     print(f"File : {fname}")
     print(f"X    : {X.shape}  (trials, channels, samples)")
