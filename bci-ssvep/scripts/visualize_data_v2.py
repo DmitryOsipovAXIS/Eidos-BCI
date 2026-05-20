@@ -49,6 +49,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-filter", action="store_true", help="Skip bandpass filtering")
     parser.add_argument("--nperseg", type=int, default=256, help="Welch segment length")
     parser.add_argument("--show-trial", type=int, default=0, help="Trial index to preview")
+    parser.add_argument("--debug-power", action="store_true",
+                        help="Print per-trial power near target frequencies")
     return parser.parse_args()
 
 
@@ -132,18 +134,42 @@ def main() -> None:
     left_f = maybe_filter(left_trials)
     right_f = maybe_filter(right_trials)
 
+    nperseg = min(args.nperseg, n_samples)
+
+    if args.debug_power:
+        band_hz = 0.5
+
+        def band_power(trial: np.ndarray, target: float) -> float:
+            p_list = []
+            for ch in range(n_ch):
+                f, pxx = welch(trial[ch], fs=fs, nperseg=nperseg)
+                mask = (f >= target - band_hz) & (f <= target + band_hz)
+                if not np.any(mask):
+                    p_list.append(0.0)
+                else:
+                    p_list.append(float(np.mean(pxx[mask])))
+            return float(np.mean(p_list))
+
+        print("\nPer-trial band power (mean over channels)")
+        print("idx  label  p@left  p@right")
+        for i in range(n_trials):
+            trial = X[i]
+            if not args.no_filter:
+                trial = bandpass_filter(trial, fs, low, high)
+            p_left = band_power(trial, left_hz)
+            p_right = band_power(trial, right_hz)
+            print(f"{i:>3}  {int(y[i]):>5}  {p_left:>7.3g}  {p_right:>7.3g}")
+
     # ------------------------------------------------------------------
     # Figure 1: PSD per channel (LEFT vs RIGHT)
     # ------------------------------------------------------------------
     fig1, axes = plt.subplots(n_ch, 2, figsize=(12, n_ch * 2.2), sharex=True, sharey=True)
     fig1.suptitle("PSD per channel (LEFT vs RIGHT)", fontsize=13)
 
-    nperseg = min(args.nperseg, n_samples)
-
     for ci in range(n_ch):
-        for col, (trials, label, color) in enumerate([
-            (left_f, f"LEFT ({left_hz} Hz)", "steelblue"),
-            (right_f, f"RIGHT ({right_hz} Hz)", "tomato"),
+        for col, (trials, label, color, target_hz) in enumerate([
+            (left_f, f"LEFT ({left_hz} Hz)", "steelblue", left_hz),
+            (right_f, f"RIGHT ({right_hz} Hz)", "tomato", right_hz),
         ]):
             ax = axes[ci, col] if n_ch > 1 else axes[col]
             if trials.size == 0:
@@ -160,8 +186,7 @@ def main() -> None:
             ax.semilogy(f, mean_psd, color=color, linewidth=1.6)
             ax.fill_between(f, mean_psd - std_psd, mean_psd + std_psd,
                             alpha=0.2, color=color)
-            ax.axvline(left_hz, color="steelblue", linestyle="--", alpha=0.7)
-            ax.axvline(right_hz, color="tomato", linestyle="--", alpha=0.7)
+            ax.axvline(target_hz, color=color, linestyle="--", alpha=0.7)
             if ci == 0:
                 ax.set_title(label)
             if col == 0:
