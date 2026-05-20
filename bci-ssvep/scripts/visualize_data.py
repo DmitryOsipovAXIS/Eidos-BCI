@@ -34,10 +34,20 @@ def load_latest(data_dir: Path):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", default=None, help="Path to X_*.npy file")
+    parser.add_argument("--fs", type=float, default=125.0,
+                        help="Sampling rate in Hz (Neuropawn Knight = 125)")
+    parser.add_argument("--left-hz", type=float, default=None,
+                        help="Left flicker frequency used during collection")
+    parser.add_argument("--right-hz", type=float, default=None,
+                        help="Right flicker frequency used during collection")
     args = parser.parse_args()
 
     config = SSVEPConfig()
-    fs = 250.0
+    if args.left_hz is not None:
+        config.left_hz = args.left_hz
+    if args.right_hz is not None:
+        config.right_hz = args.right_hz
+    fs = args.fs
 
     if args.file:
         x_path = Path(args.file)
