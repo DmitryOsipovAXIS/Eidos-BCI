@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file", default=None, help="Path to X_*.npy file")
     parser.add_argument("--left-hz", type=float, default=None, help="Left target frequency")
     parser.add_argument("--right-hz", type=float, default=None, help="Right target frequency")
+    parser.add_argument("--single-hz", type=float, default=None,
+                        help="Single-frequency test visualization")
     parser.add_argument("--sample-rate", type=float, default=None, help="Sampling rate in Hz")
     parser.add_argument("--record-seconds", type=float, default=30.0,
                         help="Total recording seconds per trial (default 30.0)")
@@ -71,9 +73,13 @@ def main() -> None:
     else:
         X, y, fname = load_latest(config.data_raw_dir)
 
-    # Defaults aligned with collect_training_data_v2.py
-    left_hz = float(args.left_hz) if args.left_hz is not None else 10.0
-    right_hz = float(args.right_hz) if args.right_hz is not None else 15.0
+    if args.single_hz is not None:
+        left_hz = float(args.single_hz)
+        right_hz = float(args.single_hz)
+    else:
+        # Defaults aligned with collect_training_data_v2.py
+        left_hz = float(args.left_hz) if args.left_hz is not None else 7.5
+        right_hz = float(args.right_hz) if args.right_hz is not None else 12.0
 
     n_trials, n_ch, n_samples = X.shape
     if args.sample_rate is not None:
@@ -115,6 +121,8 @@ def main() -> None:
 
     def maybe_filter(trials: np.ndarray) -> np.ndarray:
         if args.no_filter:
+            return trials
+        if trials.size == 0:
             return trials
         filtered = []
         for trial in trials:

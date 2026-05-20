@@ -36,7 +36,7 @@ def main() -> None:
     parser.add_argument("--file", default=None, help="Path to X_*.npy file")
     args = parser.parse_args()
 
-    config = SSVEPConfig()
+    config = SSVEPConfig(left_hz=8.0, right_hz=15.0)
     fs = config.sample_rate_hz
 
     if args.file:
