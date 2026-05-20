@@ -177,6 +177,7 @@ def main() -> None:
             ("6x", 6, None, None),
             ("10x", 10, None, None),
             ("20x", 20, None, None),
+            ("7.5 Hz / 60s", 1, 7.5, 60.0),
             ("15 Hz / 60s", 1, 15.0, 60.0),
         ]
         btn_w, btn_h = int(W * 0.18), int(H * 0.12)
