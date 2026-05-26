@@ -31,6 +31,10 @@ def load_pair(x_path: Path) -> tuple[np.ndarray, np.ndarray, str]:
     return np.load(x_path), np.load(y_path), x_path.name
 
 
+def list_candidate_files(scan_dir: Path) -> list[Path]:
+    return sorted(scan_dir.glob("X_*.npy"))
+
+
 def infer_sample_rate(n_samples: int, record_seconds: float, discard_seconds: float) -> float:
     kept_seconds = max(1e-6, record_seconds - discard_seconds)
     return n_samples / kept_seconds
@@ -46,9 +50,90 @@ def bandpass(eeg: np.ndarray, fs: float, low: float, high: float) -> np.ndarray:
     return filtfilt(b, a, eeg, axis=-1)
 
 
+def score_file(x_path: Path, target_hz: float, record_seconds: float, discard_seconds: float) -> tuple[float, dict[str, float]]:
+    X, y, _ = load_pair(x_path)
+    n_trials, n_ch, n_samples = X.shape
+    fs = infer_sample_rate(n_samples, record_seconds, discard_seconds)
+
+    if not (y.size > 0 and np.all(y == 0)):
+        raise ValueError("not a LEFT-only recording")
+
+    trial = X[0]
+
+    psds = []
+    freqs = None
+    for ch in range(n_ch):
+        freqs, pxx = periodogram(trial[ch], fs=fs, scaling="density", detrend="constant")
+        psds.append(pxx)
+    mean_psd = np.mean(np.asarray(psds), axis=0)
+
+    center_idx = int(np.argmin(np.abs(freqs - target_hz)))
+    center_power = float(mean_psd[center_idx])
+
+    nearby_freqs = [target_hz - 1.5, target_hz - 1.0, target_hz - 0.5, target_hz + 0.5, target_hz + 1.0, target_hz + 1.5]
+    nearby_powers = []
+    for hz in nearby_freqs:
+        idx = int(np.argmin(np.abs(freqs - hz)))
+        nearby_powers.append(float(mean_psd[idx]))
+    nearby_mean = float(np.mean(nearby_powers))
+
+    window = (freqs >= max(4.0, target_hz - 2.5)) & (freqs <= min(12.0, target_hz + 2.5))
+    if np.any(window):
+        peak_idx = int(np.argmax(mean_psd[window]))
+        peak_freq = float(freqs[window][peak_idx])
+        peak_power = float(mean_psd[window][peak_idx])
+    else:
+        peak_idx = int(np.argmax(mean_psd))
+        peak_freq = float(freqs[peak_idx])
+        peak_power = float(mean_psd[peak_idx])
+
+    peak_alignment = max(0.1, 1.0 - abs(peak_freq - target_hz) / 2.5)
+    score = (center_power / (nearby_mean + 1e-12)) * peak_alignment
+    details = {
+        "fs": fs,
+        "center_power": center_power,
+        "nearby_mean": nearby_mean,
+        "peak_freq": peak_freq,
+        "peak_power": peak_power,
+        "peak_alignment": peak_alignment,
+        "score": score,
+    }
+    return score, details
+
+
+def auto_select_file(scan_dir: Path, target_hz: float, record_seconds: float, discard_seconds: float) -> Path:
+    candidates = list_candidate_files(scan_dir)
+    if not candidates:
+        raise FileNotFoundError(f"No X_*.npy files found in {scan_dir}")
+
+    scored: list[tuple[float, Path, dict[str, float]]] = []
+    for candidate in candidates:
+        try:
+            score, details = score_file(candidate, target_hz, record_seconds, discard_seconds)
+            scored.append((score, candidate, details))
+        except Exception as exc:
+            print(f"Skipping {candidate.name}: {exc}")
+
+    if not scored:
+        raise RuntimeError(f"No usable X_*.npy files found in {scan_dir}")
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    print("\nCandidate scores (higher is better):")
+    for score, candidate, details in scored:
+        print(
+            f"  {candidate.name}: score={score:0.3f} | fs={details['fs']:0.2f} Hz | "
+            f"peak={details['peak_freq']:0.3f} Hz | center={details['center_power']:0.3g} | nearby={details['nearby_mean']:0.3g}"
+        )
+
+    best = scored[0][1]
+    print(f"\nSelected file: {best.name}")
+    return best
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", default=None, help="Path to X_*.npy file")
+    parser.add_argument("--scan-dir", default=None, help="Scan a directory and auto-select the best 7.5 Hz file")
     parser.add_argument("--left-hz", type=float, default=7.5, help="Target frequency to highlight")
     parser.add_argument("--sample-rate", type=float, default=None, help="Override sample rate")
     parser.add_argument("--record-seconds", type=float, default=30.0, help="Nominal recording duration")
@@ -63,6 +148,10 @@ def main() -> None:
     config = SSVEPConfig()
     if args.file:
         x_path = Path(args.file)
+        X, y, fname = load_pair(x_path)
+    elif args.scan_dir:
+        scan_dir = Path(args.scan_dir)
+        x_path = auto_select_file(scan_dir, args.left_hz, args.record_seconds, args.discard_seconds)
         X, y, fname = load_pair(x_path)
     else:
         x_files = sorted(config.data_raw_dir.glob("X_*.npy"))

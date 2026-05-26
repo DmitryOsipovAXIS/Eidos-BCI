@@ -3,7 +3,6 @@
 Usage:
   python scripts/collect_training_data.py --serial-port COM4
   python scripts/collect_training_data.py --no-eeg   # visual test only
-  python scripts/collect_training_data.py --trials 20
   python scripts/collect_training_data.py --fullscreen  !!!!
 
 """
@@ -27,10 +26,8 @@ if str(ROOT / "src") not in sys.path:
 from utils.config import SSVEPConfig
 
 MONITOR_HZ = 60
-RECORD_S   = 4.0
-REST_S     = 2.0
-CUE_S      = 0.5
-ITI_S      = 1.0
+BLOCK_S    = 30.0
+TOTAL_S    = 5 * 60.0
 DISCARD_S  = 0.5
 
 BG    = (0,   0,   0)
@@ -44,7 +41,7 @@ RED   = (255, 80,  80)
 def _record(stream, label: int, result: dict) -> None:
     from acquisition.brainflow_stream import collect_labeled_window
     try:
-        eeg, lbl = collect_labeled_window(stream, label, RECORD_S, DISCARD_S)
+        eeg, lbl = collect_labeled_window(stream, label, BLOCK_S, DISCARD_S)
         result["eeg"]   = eeg
         result["label"] = lbl
     except Exception as e:
@@ -54,7 +51,6 @@ def _record(stream, label: int, result: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--serial-port", default="COM4")
-    parser.add_argument("--trials", type=int, default=20, help="Trials per class")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
     parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen stimulus window")
     parser.add_argument("--left-hz",      type=float, default=7.5, help="Left box frequency (default 7.5)")
@@ -96,7 +92,7 @@ def main() -> None:
     print("LEFT:  label=0", flush=True)
     print("RIGHT: label=1", flush=True)
     print("Console will show PSD summaries from the recorded EEG that gets saved to disk.", flush=True)
-    print(f"record window={RECORD_S:0.1f}s, discard start={DISCARD_S:0.1f}s", flush=True)
+    print(f"block duration={BLOCK_S:0.1f}s, total flicker time={TOTAL_S/60:0.1f} min, discard start={DISCARD_S:0.1f}s", flush=True)
 
     # ------------------------------------------------------------------
     # Board init
@@ -112,12 +108,17 @@ def main() -> None:
                                  num_channels=args.num_channels)
         stream.prepare_session()
         stream.start_stream()
+        actual_fs = stream.sampling_rate()
+        if abs(actual_fs - 125.0) > 1e-6:
+            stream.stop_stream()
+            stream.release_session()
+            raise RuntimeError(f"Board sampling rate is {actual_fs:0.3f} Hz, expected 125.000 Hz")
         time.sleep(2)
         for ch in range(1, 9):
             time.sleep(0.5); stream.board.config_board(f"chon_{ch}_12")
             time.sleep(1);   stream.board.config_board(f"rldadd_{ch}")
             time.sleep(0.5)
-        print("Board ready.", flush=True)
+        print(f"Board ready at {actual_fs:0.3f} Hz.", flush=True)
 
     # ------------------------------------------------------------------
     # pygame init
@@ -153,12 +154,15 @@ def main() -> None:
         pygame.draw.polygon(screen, color, pts)
 
     # ------------------------------------------------------------------
-    # Trial sequence: interleaved LEFT / RIGHT
+    # Trial sequence: interleaved LEFT / RIGHT for 5 minutes total
     # ------------------------------------------------------------------
-    labels = [v for _ in range(args.trials) for v in [0, 1]]
+    labels = [0 if i % 2 == 0 else 1 for i in range(int(TOTAL_S / BLOCK_S))]
     X_list: list[np.ndarray] = []
     y_list: list[int] = []
     running = True
+
+    print(f"Planned schedule: {len(labels)} blocks x {BLOCK_S:0.1f}s = {TOTAL_S/60:0.1f} min", flush=True)
+    print("Alternation: LEFT, RIGHT, LEFT, RIGHT, ...", flush=True)
 
     for idx, label in enumerate(labels):
         if not running:
@@ -172,37 +176,6 @@ def main() -> None:
         print(f"\nTRIAL {idx + 1:02d}/{len(labels):02d}", flush=True)
         print(f"{side}: label={label}", flush=True)
 
-        # REST
-        end = pygame.time.get_ticks() + int(REST_S * 1000)
-        while pygame.time.get_ticks() < end:
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
-                    running = False
-            screen.fill(BG)
-            blit_c(f"Trial {idx+1} / {len(labels)}", GREY, False, W // 2, H // 8)
-            pygame.draw.line(screen, GREY, (W//2-22, H//2), (W//2+22, H//2), 3)
-            pygame.draw.line(screen, GREY, (W//2, H//2-22), (W//2, H//2+22), 3)
-            pygame.display.flip()
-            clock.tick(MONITOR_HZ)
-
-        if not running:
-            break
-
-        # CUE
-        end = pygame.time.get_ticks() + int(CUE_S * 1000)
-        while pygame.time.get_ticks() < end:
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
-                    running = False
-            screen.fill(BG)
-            blit_c(f"LOOK  {side}", col, True, W // 2, H // 8)
-            draw_arrow(acx, acy, side, col)
-            pygame.display.flip()
-            clock.tick(MONITOR_HZ)
-
-        if not running:
-            break
-
         # FLICKER + RECORD
         result: dict = {}
         if stream is not None:
@@ -214,8 +187,9 @@ def main() -> None:
         left_phase  = 0.0
         right_phase = 0.0
         last_t = time.perf_counter()
-        end = pygame.time.get_ticks() + int(RECORD_S * 1000)
-        while pygame.time.get_ticks() < end:
+        block_start = time.perf_counter()
+        block_end = block_start + BLOCK_S
+        while time.perf_counter() < block_end:
             for e in pygame.event.get():
                 if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
                     running = False
@@ -237,14 +211,15 @@ def main() -> None:
             pygame.draw.rect(screen, BLUE if label == 0 else (40, 40, 40), lrect,  4)
             pygame.draw.rect(screen, RED  if label == 1 else (40, 40, 40), rrect, 4)
 
-            blit_c(f"{config.left_hz:.0f} Hz",  BLUE, False, lrect.centerx, lrect.bottom + 20)
-            blit_c(f"{config.right_hz:.0f} Hz", RED,  False, rrect.centerx, rrect.bottom + 20)
+            blit_c(f"{config.left_hz:.1f} Hz",  BLUE, False, lrect.centerx, lrect.bottom + 20)
+            blit_c(f"{config.right_hz:.1f} Hz", RED,  False, rrect.centerx, rrect.bottom + 20)
+            blit_c(f"Block {idx + 1}/{len(labels)}  |  {max(0.0, block_end - now):0.1f}s", GREY, False, W // 2, H // 8)
 
             pygame.display.flip()
             clock.tick(MONITOR_HZ)
 
         if t is not None:
-            t.join(timeout=RECORD_S + 2)
+            t.join(timeout=BLOCK_S + 2)
             if "error" in result:
                 print(f"  Trial {idx+1} error: {result['error']}", flush=True)
             elif "eeg" in result:
@@ -254,16 +229,6 @@ def main() -> None:
                 print_recorded_psd(side, result["eeg"], stream.sampling_rate())
         elif args.no_eeg:
             print(f"{side}: no EEG recorded in --no-eeg mode", flush=True)
-
-        # ITI
-        end = pygame.time.get_ticks() + int(ITI_S * 1000)
-        while pygame.time.get_ticks() < end:
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
-                    running = False
-            screen.fill(BG)
-            pygame.display.flip()
-            clock.tick(MONITOR_HZ)
 
     pygame.quit()
 
