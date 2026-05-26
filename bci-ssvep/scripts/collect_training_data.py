@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pygame
+from scipy.signal import welch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
@@ -56,12 +57,46 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=20, help="Trials per class")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
     parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen stimulus window")
-    parser.add_argument("--left-hz",      type=float, default=10.0, help="Left box frequency (default 10.0)")
-    parser.add_argument("--right-hz",     type=float, default=15.0, help="Right box frequency (default 15.0)")
-    parser.add_argument("--num-channels", type=int,   default=4,    help="Number of EEG channels (default 4)")
+    parser.add_argument("--left-hz",      type=float, default=7.5, help="Left box frequency (default 7.5)")
+    parser.add_argument("--right-hz",     type=float, default=12.0, help="Right box frequency (default 12.0)")
+    parser.add_argument("--num-channels", type=int,   default=8,    help="Number of EEG channels (default 8)")
     args = parser.parse_args()
 
     config = SSVEPConfig(left_hz=args.left_hz, right_hz=args.right_hz)
+
+    def fmt_hz(value: float) -> str:
+        return f"{value:0.3f} Hz"
+
+    def print_recorded_psd(side: str, eeg: np.ndarray, fs: float) -> None:
+        n_samples = eeg.shape[1]
+        nperseg = min(1024, n_samples)
+        psds = []
+        freqs = None
+        for ch in range(eeg.shape[0]):
+            freqs, pxx = welch(eeg[ch], fs=fs, nperseg=nperseg)
+            psds.append(pxx)
+        mean_psd = np.mean(np.stack(psds, axis=0), axis=0)
+
+        target_bins = []
+        for target in (config.left_hz, config.right_hz):
+            idx = int(np.argmin(np.abs(freqs - target)))
+            target_bins.append((target, float(freqs[idx]), float(mean_psd[idx])))
+
+        mask = (freqs >= max(1.0, min(config.left_hz, config.right_hz) - 2.0)) & \
+               (freqs <= max(config.left_hz, config.right_hz) + 2.0)
+        peak_freq = float(freqs[mask][np.argmax(mean_psd[mask])]) if np.any(mask) else float(freqs[np.argmax(mean_psd)])
+        peak_power = float(np.max(mean_psd[mask])) if np.any(mask) else float(np.max(mean_psd))
+
+        print(f"{side}: recorded EEG shape={eeg.shape}", flush=True)
+        print(f"{side}: peak frequency in target band={peak_freq:0.3f} Hz (power={peak_power:0.3g})", flush=True)
+        for target, bin_freq, bin_power in target_bins:
+            print(f"{side}: power near {target:0.3f} Hz -> bin {bin_freq:0.3f} Hz, power={bin_power:0.3g}", flush=True)
+
+    print("Configured stimulus labels:", flush=True)
+    print("LEFT:  label=0", flush=True)
+    print("RIGHT: label=1", flush=True)
+    print("Console will show PSD summaries from the recorded EEG that gets saved to disk.", flush=True)
+    print(f"record window={RECORD_S:0.1f}s, discard start={DISCARD_S:0.1f}s", flush=True)
 
     # ------------------------------------------------------------------
     # Board init
@@ -133,6 +168,9 @@ def main() -> None:
         col  = BLUE   if label == 0 else RED
         acx  = lrect.centerx if label == 0 else rrect.centerx
         acy  = cy - bh // 2 - 55
+
+        print(f"\nTRIAL {idx + 1:02d}/{len(labels):02d}", flush=True)
+        print(f"{side}: label={label}", flush=True)
 
         # REST
         end = pygame.time.get_ticks() + int(REST_S * 1000)
@@ -213,6 +251,9 @@ def main() -> None:
                 X_list.append(result["eeg"])
                 y_list.append(result["label"])
                 print(f"  Trial {idx+1}  {side}  {result['eeg'].shape}", flush=True)
+                print_recorded_psd(side, result["eeg"], stream.sampling_rate())
+        elif args.no_eeg:
+            print(f"{side}: no EEG recorded in --no-eeg mode", flush=True)
 
         # ITI
         end = pygame.time.get_ticks() + int(ITI_S * 1000)
@@ -245,6 +286,12 @@ def main() -> None:
         ml  = min(x.shape[1] for x in X_list)
         X   = np.stack([x[:, :ml] for x in X_list])
         y   = np.array(y_list, dtype=np.int64)
+        print("\nSaving raw data:", flush=True)
+        print(f"  X shape: {X.shape}", flush=True)
+        print(f"  y shape: {y.shape}", flush=True)
+        print(f"  LEFT label=0 target={config.left_hz:0.3f} Hz", flush=True)
+        print(f"  RIGHT label=1 target={config.right_hz:0.3f} Hz", flush=True)
+        print(f"  output files: X_{ts}.npy / y_{ts}.npy", flush=True)
         np.save(config.data_raw_dir / f"X_{ts}.npy", X)
         np.save(config.data_raw_dir / f"y_{ts}.npy", y)
         print(f"\nSaved {X.shape[0]} trials  X={X.shape}  "

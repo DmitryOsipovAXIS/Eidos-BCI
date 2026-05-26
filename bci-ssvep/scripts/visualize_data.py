@@ -31,12 +31,34 @@ def load_latest(data_dir: Path):
     return np.load(x_path), np.load(y_path), x_path.name
 
 
+def mean_psd_for_trials(trials: np.ndarray, fs: float, low: float, high: float, n_samples: int, n_ch: int):
+    """Return frequency bins and mean/std PSD for a set of trials.
+
+    If no trials are present, returns ``(None, None, None)``.
+    """
+    if trials.size == 0:
+        return None, None, None
+
+    psds = []
+    freqs = None
+    for trial in trials:
+        filtered = bandpass_filter(trial, fs, low, high)
+        ch_psds = []
+        for ch in range(n_ch):
+            freqs, pxx = welch(filtered[ch], fs=fs, nperseg=min(256, n_samples))
+            ch_psds.append(pxx)
+        psds.append(np.mean(ch_psds, axis=0))
+
+    psds = np.asarray(psds)
+    return freqs, np.mean(psds, axis=0), np.std(psds, axis=0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", default=None, help="Path to X_*.npy file")
     args = parser.parse_args()
 
-    config = SSVEPConfig(left_hz=8.0, right_hz=15.0)
+    config = SSVEPConfig()
     fs = config.sample_rate_hz
 
     if args.file:
@@ -71,22 +93,24 @@ def main() -> None:
         [f"LEFT ({config.left_hz} Hz)", f"RIGHT ({config.right_hz} Hz)"],
         ["steelblue", "tomato"],
     ):
-        psds = []
-        for trial in trials:
-            filtered = bandpass_filter(trial, fs, low, high)
-            # average across channels
-            ch_psds = []
-            for ch in range(n_ch):
-                f, pxx = welch(filtered[ch], fs=fs, nperseg=min(256, n_samples))
-                ch_psds.append(pxx)
-            psds.append(np.mean(ch_psds, axis=0))
+        f, mean_psd, std_psd = mean_psd_for_trials(trials, fs, low, high, n_samples, n_ch)
+        if f is None:
+            ax.text(0.5, 0.5, f"No trials for {label}", ha="center", va="center",
+                    transform=ax.transAxes, fontsize=11)
+            ax.set_xlim(2, 20)
+            ax.set_xlabel("Frequency (Hz)")
+            ax.set_ylabel("Power (log scale)")
+            ax.set_title(label)
+            ax.grid(True, alpha=0.3)
+            continue
 
-        mean_psd = np.mean(psds, axis=0)
-        std_psd  = np.std(psds,  axis=0)
+        mean_psd = np.asarray(mean_psd)
+        std_psd = np.asarray(std_psd)
+        safe_lower = np.clip(mean_psd - std_psd, 1e-12, None)
+        safe_upper = np.clip(mean_psd + std_psd, 1e-12, None)
 
         ax.semilogy(f, mean_psd, color=color, linewidth=2, label=label)
-        ax.fill_between(f, mean_psd - std_psd, mean_psd + std_psd,
-                        alpha=0.2, color=color)
+        ax.fill_between(f, safe_lower, safe_upper, alpha=0.2, color=color)
         ax.axvline(config.left_hz,  color="steelblue", linestyle="--",
                    alpha=0.7, label=f"{config.left_hz} Hz (left target)")
         ax.axvline(config.right_hz, color="tomato",    linestyle="--",
@@ -108,19 +132,28 @@ def main() -> None:
 
     ch_names = ["POz", "O1", "Oz", "O2"]
 
+    example_trials = [left_trials[0] if len(left_trials) else None,
+                      right_trials[0] if len(right_trials) else None]
+
     for ci in range(n_ch):
-        for col, (trial, color) in enumerate(zip(
-            [left_trials[0], right_trials[0]],
-            ["steelblue", "tomato"]
+        for col, (trial, color, side_label) in enumerate(zip(
+            example_trials,
+            ["steelblue", "tomato"],
+            ["LEFT", "RIGHT"],
         )):
             ax = axes2[ci, col]
+            if trial is None:
+                ax.text(0.5, 0.5, f"No {side_label} trials", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=10)
+                ax.set_axis_off()
+                continue
             ax.plot(t, trial[ci], color=color, linewidth=0.6)
             ax.set_ylabel(ch_names[ci] if ci < len(ch_names) else f"Ch{ci}",
                           fontsize=8)
             ax.set_yticks([])
             ax.grid(True, alpha=0.2)
             if ci == 0:
-                ax.set_title("LEFT trial" if col == 0 else "RIGHT trial")
+                ax.set_title(f"{side_label} trial")
             if ci == n_ch - 1:
                 ax.set_xlabel("Time (s)")
 
@@ -139,10 +172,12 @@ def main() -> None:
     feats = np.array(feats)
 
     fig3, ax3 = plt.subplots(figsize=(7, 6))
-    ax3.scatter(feats[y==0, 0], feats[y==0, 1],
-                color="steelblue", label="LEFT",  alpha=0.7, s=60)
-    ax3.scatter(feats[y==1, 0], feats[y==1, 1],
-                color="tomato",    label="RIGHT", alpha=0.7, s=60)
+    if np.any(y == 0):
+        ax3.scatter(feats[y == 0, 0], feats[y == 0, 1],
+                    color="steelblue", label="LEFT",  alpha=0.7, s=60)
+    if np.any(y == 1):
+        ax3.scatter(feats[y == 1, 0], feats[y == 1, 1],
+                    color="tomato",    label="RIGHT", alpha=0.7, s=60)
     ax3.set_xlabel(f"log power @ {config.left_hz} Hz")
     ax3.set_ylabel(f"log power @ {config.right_hz} Hz")
     ax3.set_title("Feature space — are LEFT and RIGHT separable?")

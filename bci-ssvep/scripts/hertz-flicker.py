@@ -44,8 +44,8 @@ from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
 # ---------------------------------------------------------------------------
 
 BOXES = [
-    {"freq": 12.0, "label": "12 Hz", "color": "#FF4444"},  # red    (60÷5)
-    {"freq": 15.0, "label": "15 Hz", "color": "#FFFF44"},  # yellow (60÷4)
+    {"freq": 7.5, "label": "7.5 Hz", "color": "#FF4444"},  # red    (60÷5)
+    {"freq": 12.0, "label": "12 Hz", "color": "#FFFF44"},  # yellow (60÷4)
 ]
 
 CHANNELS = [
