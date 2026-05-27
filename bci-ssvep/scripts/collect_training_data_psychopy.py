@@ -5,13 +5,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-TRIALS = 20
+TRIALS = 1
 MODE = "both"
 FREQ_LEFT = 7.5
 FREQ_RIGHT = 12.0
 SERIAL_PORT = "COM3"
 NUM_CHANNELS = 8
-NO_EEG = True
+NO_EEG = False
 
 conditions_path = ROOT / "src" / "collection" / "conditions.csv"
 
@@ -30,7 +30,7 @@ with open(conditions_path, "w", newline="") as f:
 
 print(f"Generated {len(rows)} trials ({MODE}) -> {conditions_path}")
 
-script = ROOT / "src" / "collection" / "training_lastrun.py"
+script = ROOT / "src" / "collection" / "collecting_lastrun.py"
 cmd = [
     sys.executable, str(script),
     f"--freq-left={FREQ_LEFT}",
