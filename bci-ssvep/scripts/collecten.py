@@ -365,6 +365,43 @@ def _print_psd_summary(eeg: np.ndarray, fs: float, target_hz: float) -> None:
 	print(f"Power at {target_hz:0.3f} Hz -> bin {freqs[idx]:0.3f} Hz, power={mean_psd[idx]:0.3g}", flush=True)
 
 
+def _init_board(args) -> tuple[Optional[object], Optional[float]]:
+	from acquisition.brainflow_stream import BrainFlowStream
+	from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
+
+	BoardShim.disable_board_logger()
+	p = BrainFlowInputParams()
+	if args.serial_port:
+		p.serial_port = args.serial_port
+	stream = BrainFlowStream(
+		board_id=BoardIds.NEUROPAWN_KNIGHT_BOARD.value,
+		params=p,
+		num_channels=args.num_channels,
+	)
+	stream.prepare_session()
+	stream.start_stream()
+	time.sleep(2)
+	for ch in range(1, args.num_channels + 1):
+		time.sleep(0.25)
+		try:
+			stream.board.config_board(f"chon_{ch}_12")
+		except Exception:
+			pass
+		time.sleep(0.25)
+		try:
+			stream.board.config_board(f"rldadd_{ch}")
+		except Exception:
+			pass
+		time.sleep(0.25)
+	fs = stream.sampling_rate()
+	if abs(fs - 125.0) > 1e-6:
+		stream.stop_stream()
+		stream.release_session()
+		raise RuntimeError(f"Board sampling rate is {fs:0.3f} Hz, expected 125.000 Hz")
+	print(f"Board ready at {fs:0.3f} Hz", flush=True)
+	return stream, fs
+
+
 def main() -> None:
 	parser = argparse.ArgumentParser(description="SSVEP collection with start menu")
 	parser.add_argument("--serial-port", default=None)
@@ -384,6 +421,12 @@ def main() -> None:
 	parser.add_argument("--alt-start", type=int, choices=[0, 1], default=0)
 	parser.add_argument("--save", action="store_true", help="Save raw X/y to data/raw")
 	args = parser.parse_args()
+
+	stream = None
+	fs: Optional[float] = None
+	if args.mode == "menu" and not args.no_eeg:
+		print("Initializing board...", flush=True)
+		stream, fs = _init_board(args)
 
 	selection = None
 	if args.mode == "menu":
@@ -412,42 +455,8 @@ def main() -> None:
 		duration_s = args.single_duration
 		label = 0 if side == "left" else 1
 
-	stream = None
-	fs: Optional[float] = None
-	if not args.no_eeg:
-		from acquisition.brainflow_stream import BrainFlowStream
-		from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
-
-		BoardShim.disable_board_logger()
-		p = BrainFlowInputParams()
-		if args.serial_port:
-			p.serial_port = args.serial_port
-		stream = BrainFlowStream(
-			board_id=BoardIds.NEUROPAWN_KNIGHT_BOARD.value,
-			params=p,
-			num_channels=args.num_channels,
-		)
-		stream.prepare_session()
-		stream.start_stream()
-		time.sleep(2)
-		for ch in range(1, args.num_channels + 1):
-			time.sleep(0.25)
-			try:
-				stream.board.config_board(f"chon_{ch}_12")
-			except Exception:
-				pass
-			time.sleep(0.25)
-			try:
-				stream.board.config_board(f"rldadd_{ch}")
-			except Exception:
-				pass
-			time.sleep(0.25)
-		fs = stream.sampling_rate()
-		if abs(fs - 125.0) > 1e-6:
-			stream.stop_stream()
-			stream.release_session()
-			raise RuntimeError(f"Board sampling rate is {fs:0.3f} Hz, expected 125.000 Hz")
-		print(f"Board ready at {fs:0.3f} Hz", flush=True)
+	if stream is None and not args.no_eeg:
+		stream, fs = _init_board(args)
 
 	if args.mode == "alt":
 		eeg_list = _run_alternating(
