@@ -49,7 +49,7 @@ class SSVEPPipeline:
         n_harmonics: int = 3,
         notch_hz: float = 50.0,
         bandpass_low_hz: float = 3.0,
-        bandpass_high_hz: float = 30.0,
+        bandpass_high_hz: float = 40.0,
         labels: list[str] | None = None,
     ) -> None:
         if frequencies_hz is None:

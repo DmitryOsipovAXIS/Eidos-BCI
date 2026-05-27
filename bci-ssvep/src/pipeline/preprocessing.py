@@ -18,12 +18,12 @@ Downsampling:
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import resample_poly
+from scipy.signal import resample_poly, detrend
 from math import gcd
 
 
 def common_average_reference(data: np.ndarray) -> np.ndarray:
-    """Subtract the cross-channel mean at every sample (CAR rereferencing).
+    """Detrend, then subtract the cross-channel mean at every sample (CAR rereferencing).
 
     Args:
         data: ``(n_channels, n_samples)`` EEG array.
@@ -33,6 +33,7 @@ def common_average_reference(data: np.ndarray) -> np.ndarray:
     """
     if data.ndim != 2:
         raise ValueError(f"Expected 2-D (n_channels, n_samples), got shape {data.shape}")
+    data = detrend(data, axis=-1)
     return data - data.mean(axis=0, keepdims=True)
 
 

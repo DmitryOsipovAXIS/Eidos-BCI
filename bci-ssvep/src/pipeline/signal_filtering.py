@@ -19,7 +19,7 @@ def notch_filter(
     data: np.ndarray,
     sample_rate_hz: float,
     notch_hz: float = 50.0,
-    quality_factor: float = 30.0,
+    quality_factor: float = 15.0,
 ) -> np.ndarray:
     """Remove a narrow frequency band (default 50 Hz AC line noise).
 

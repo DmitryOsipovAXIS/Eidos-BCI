@@ -204,10 +204,10 @@ def main() -> None:
     parser.add_argument("--left-hz", type=float, default=7.5)
     parser.add_argument("--right-hz", type=float, default=12.0)
     parser.add_argument("--sample-rate", type=float, default=125.0)
-    parser.add_argument("--harmonics", type=int, default=6)
+    parser.add_argument("--harmonics", type=int, default=3)
     parser.add_argument("--notch-hz", type=float, default=50.0)
     parser.add_argument("--bp-low", type=float, default=3.0)
-    parser.add_argument("--bp-high", type=float, default=60.0)
+    parser.add_argument("--bp-high", type=float, default=40.0)
     parser.add_argument("--no-plot", action="store_true", help="Skip visualization")
     args = parser.parse_args()
 
