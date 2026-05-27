@@ -28,10 +28,10 @@ if str(ROOT / "src") not in sys.path:
 from utils.config import SSVEPConfig
 
 DEFAULT_MONITOR_HZ = 60
-RECORD_S = 30.0
+RECORD_S = 4.0
 REST_S = 2.0
 CUE_S = 0.6
-ITI_S = 10.0
+ITI_S = 1.0
 DISCARD_S = 0.5
 
 BG = (0, 0, 0)
@@ -42,17 +42,11 @@ BLUE = (80, 120, 255)
 RED = (255, 80, 80)
 
 
-def _record(
-    stream,
-    label: int,
-    result: dict,
-    start_event: threading.Event,
-    record_seconds: float,
-) -> None:
+def _record(stream, label: int, result: dict, start_event: threading.Event) -> None:
     from acquisition.brainflow_stream import collect_labeled_window
     try:
-        start_event.wait(timeout=record_seconds + 2)
-        eeg, lbl = collect_labeled_window(stream, label, record_seconds, DISCARD_S)
+        start_event.wait(timeout=RECORD_S + 2)
+        eeg, lbl = collect_labeled_window(stream, label, RECORD_S, DISCARD_S)
         result["eeg"] = eeg
         result["label"] = lbl
     except Exception as e:
@@ -72,21 +66,13 @@ def _set_mode(size: tuple[int, int], fullscreen: bool) -> pygame.Surface:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--serial-port", default="COM4")
-    parser.add_argument("--trials", type=int, default=15, help="Total trials (left+right)")
+    parser.add_argument("--trials", type=int, default=20, help="Trials per class")
     parser.add_argument("--no-eeg", action="store_true", help="Visual test, no board")
     parser.add_argument("--fullscreen", action="store_true", help="Use fullscreen window")
     parser.add_argument("--monitor-hz", type=float, default=DEFAULT_MONITOR_HZ,
                         help="Monitor refresh rate (default 60)")
-    parser.add_argument("--record-seconds", type=float, default=RECORD_S,
-                        help="Flicker/record duration per trial in seconds")
-    parser.add_argument("--test-hz", type=float, default=None,
-                        help="Single-frequency test (one long trial)")
-    parser.add_argument("--test-seconds", type=float, default=60.0,
-                        help="Duration for --test-hz in seconds")
-    parser.add_argument("--no-start-screen", action="store_true",
-                        help="Skip trial selection start screen")
-    parser.add_argument("--left-hz", type=float, default=7.5, help="Left box frequency")
-    parser.add_argument("--right-hz", type=float, default=12.0, help="Right box frequency")
+    parser.add_argument("--left-hz", type=float, default=10.0, help="Left box frequency")
+    parser.add_argument("--right-hz", type=float, default=15.0, help="Right box frequency")
     parser.add_argument("--num-channels", type=int, default=4, help="Number of EEG channels")
     parser.add_argument("--single-target-flicker", action="store_true",
                         help="Only the target flickers (default)")
@@ -97,13 +83,6 @@ def main() -> None:
     single_target = True
     if args.both_flicker:
         single_target = False
-
-    if args.test_hz is not None:
-        args.left_hz = float(args.test_hz)
-        args.right_hz = float(args.test_hz)
-        args.record_seconds = float(args.test_seconds)
-        args.trials = 1
-        args.no_start_screen = True
 
     config = SSVEPConfig(left_hz=args.left_hz, right_hz=args.right_hz)
 
@@ -171,70 +150,10 @@ def main() -> None:
                else [(cx - sz, cy_ - sz // 2), (cx + sz, cy_), (cx - sz, cy_ + sz // 2)])
         pygame.draw.polygon(screen, color, pts)
 
-    def pick_trials() -> tuple[int, float | None, float | None] | None:
-        choices = [
-            ("1x", 1, None, None),
-            ("6x", 6, None, None),
-            ("10x", 10, None, None),
-            ("20x", 20, None, None),
-            ("7.5 Hz / 60s", 1, 7.5, 60.0),
-            ("15 Hz / 60s", 1, 15.0, 60.0),
-        ]
-        btn_w, btn_h = int(W * 0.18), int(H * 0.12)
-        gap = int(W * 0.04)
-        total_w = len(choices) * btn_w + (len(choices) - 1) * gap
-        start_x = (W - total_w) // 2
-        y = int(H * 0.55)
-        rects = []
-        for i in range(len(choices)):
-            rects.append(pygame.Rect(start_x + i * (btn_w + gap), y, btn_w, btn_h))
-
-        while True:
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT:
-                    return None
-                if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
-                    return None
-                if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                    for rect, (_, trials, test_hz, test_seconds) in zip(rects, choices):
-                        if rect.collidepoint(e.pos):
-                            return trials, test_hz, test_seconds
-
-            screen.fill(BG)
-            blit_c("Select trials", GREY, True, W // 2, H // 4)
-            blit_c(f"Record {args.record_seconds:.0f}s per trial", GREY, False, W // 2, H // 3)
-            for rect, (label, _, _, _) in zip(rects, choices):
-                pygame.draw.rect(screen, DIM, rect, border_radius=8)
-                pygame.draw.rect(screen, GREY, rect, 2, border_radius=8)
-                blit_c(label, WHITE, True, rect.centerx, rect.centery)
-            pygame.display.flip()
-            clock.tick(args.monitor_hz)
-
     # ------------------------------------------------------------------
-    # Trial selection screen
-    if not args.no_start_screen:
-        selected = pick_trials()
-        if selected is None:
-            pygame.quit()
-            return
-        trials, test_hz, test_seconds = selected
-        args.trials = trials
-        if test_hz is not None:
-            args.test_hz = test_hz
-            args.test_seconds = float(test_seconds) if test_seconds is not None else args.test_seconds
-            args.left_hz = float(test_hz)
-            args.right_hz = float(test_hz)
-            args.record_seconds = float(args.test_seconds)
-
     # Trial sequence: interleaved LEFT / RIGHT
     # ------------------------------------------------------------------
-    if args.test_hz is not None:
-        labels = [0]
-    else:
-        per_class = max(1, args.trials // 2)
-        labels = [v for _ in range(per_class) for v in [0, 1]]
-        if args.trials % 2 == 1:
-            labels.append(0)
+    labels = [v for _ in range(args.trials) for v in [0, 1]]
     X_list: list[np.ndarray] = []
     y_list: list[int] = []
     running = True
@@ -290,14 +209,14 @@ def main() -> None:
         if stream is not None:
             t = threading.Thread(
                 target=_record,
-                args=(stream, label, result, start_event, args.record_seconds),
+                args=(stream, label, result, start_event),
                 daemon=True,
             )
             t.start()
         else:
             t = None
 
-        end = pygame.time.get_ticks() + int(args.record_seconds * 1000)
+        end = pygame.time.get_ticks() + int(RECORD_S * 1000)
         frames = 0
         started = False
         while pygame.time.get_ticks() < end:
@@ -339,7 +258,7 @@ def main() -> None:
             frames += 1
 
         if t is not None:
-            t.join(timeout=args.record_seconds + 2)
+            t.join(timeout=RECORD_S + 2)
             if "error" in result:
                 print(f"  Trial {idx + 1} error: {result['error']}", flush=True)
             elif "eeg" in result:
