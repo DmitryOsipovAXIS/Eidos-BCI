@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 This experiment was created using PsychoPy3 Experiment Builder (v2025.1.1),
-    on May 27, 2026, at 09:50
+    on May 27, 2026, at 11:09
 If you publish work using this script the most relevant publication is:
 
     Peirce J, Gray JR, Simpson S, MacAskill M, Höchenberger R, Sogo H, Kastman E, Lindeløv JK. (2019) 
@@ -515,6 +515,13 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
         rows = list(csv.DictReader(f))
     
     has_both_sides = any(r['side'] == 'LEFT' for r in rows) and any(r['side'] == 'RIGHT' for r in rows)
+    red_middle = visual.TextStim(win=win, name='red_middle',
+        text='+',
+        font='Arial',
+        pos=(0, 0), draggable=False, height=0.05, wrapWidth=None, ori=0.0, 
+        color='red', colorSpace='rgb', opacity=None, 
+        languageStyle='LTR',
+        depth=-2.0);
     
     # --- Initialize components for Routine "Done" ---
     done_title = visual.TextStim(win=win, name='done_title',
@@ -1159,7 +1166,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
         # create an object to store info about Routine Waiting
         Waiting = data.Routine(
             name='Waiting',
-            components=[waiting_title],
+            components=[waiting_title, red_middle],
         )
         Waiting.status = NOT_STARTED
         continueRoutine = True
@@ -1242,6 +1249,40 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
                 current_display = current
             
             waiting_title.text = f"Trial {current_display} / {total_display}"
+            
+            # *red_middle* updates
+            
+            # if red_middle is starting this frame...
+            if red_middle.status == NOT_STARTED and tThisFlip >= 0.0-frameTolerance:
+                # keep track of start time/frame for later
+                red_middle.frameNStart = frameN  # exact frame index
+                red_middle.tStart = t  # local t and not account for scr refresh
+                red_middle.tStartRefresh = tThisFlipGlobal  # on global time
+                win.timeOnFlip(red_middle, 'tStartRefresh')  # time at next scr refresh
+                # add timestamp to datafile
+                thisExp.timestampOnFlip(win, 'red_middle.started')
+                # update status
+                red_middle.status = STARTED
+                red_middle.setAutoDraw(True)
+            
+            # if red_middle is active this frame...
+            if red_middle.status == STARTED:
+                # update params
+                pass
+            
+            # if red_middle is stopping this frame...
+            if red_middle.status == STARTED:
+                # is it time to stop? (based on global clock, using actual start)
+                if tThisFlipGlobal > red_middle.tStartRefresh + 4-frameTolerance:
+                    # keep track of stop time/frame for later
+                    red_middle.tStop = t  # not accounting for scr refresh
+                    red_middle.tStopRefresh = tThisFlipGlobal  # on global time
+                    red_middle.frameNStop = frameN  # exact frame index
+                    # add timestamp to datafile
+                    thisExp.timestampOnFlip(win, 'red_middle.stopped')
+                    # update status
+                    red_middle.status = FINISHED
+                    red_middle.setAutoDraw(False)
             
             # check for quit (typically the Esc key)
             if defaultKeyboard.getKeys(keyList=["escape"]):

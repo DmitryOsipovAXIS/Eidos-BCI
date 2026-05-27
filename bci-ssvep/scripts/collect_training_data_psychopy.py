@@ -11,7 +11,7 @@ FREQ_LEFT = 7.5
 FREQ_RIGHT = 12.0
 SERIAL_PORT = "COM3"
 NUM_CHANNELS = 8
-NO_EEG = False
+NO_EEG = True
 
 conditions_path = ROOT / "src" / "collection" / "conditions.csv"
 
