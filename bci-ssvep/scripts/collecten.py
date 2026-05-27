@@ -144,8 +144,9 @@ def _start_menu(fullscreen: bool) -> dict:
 	options = [
 		("1", "Left 7.5 Hz for 2 minutes", {"mode": "single", "side": "left", "hz": 7.5, "duration": 120.0}),
 		("2", "Right 12 Hz for 2 minutes", {"mode": "single", "side": "right", "hz": 12.0, "duration": 120.0}),
-		("3", "Alternate 7.5/12 Hz for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0}),
-		("4", "Use CLI settings (single or alt)", {"mode": "cli"}),
+		("3", "Right 15 Hz for 2 minutes", {"mode": "single", "side": "right", "hz": 15.0, "duration": 120.0}),
+		("4", "Alternate 7.5/12 Hz for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0}),
+		("5", "Use CLI settings (single or alt)", {"mode": "cli"}),
 	]
 
 	selected = None
@@ -177,7 +178,7 @@ def _start_menu(fullscreen: bool) -> dict:
 			screen.blit(surf, rect)
 			option_rects.append((rect.inflate(40, 16), _))
 			y += 46
-		_draw_text_center(screen, fsml, "Press 1-4 or click an option (click to focus)", H - 90, GREY)
+		_draw_text_center(screen, fsml, "Press 1-5 or click an option (click to focus)", H - 90, GREY)
 		_draw_text_center(screen, fsml, "ESC to quit", H - 60, GREY)
 		pygame.display.flip()
 		clock.tick(30)
