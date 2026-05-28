@@ -43,7 +43,7 @@ from acquisition.brainflow_stream import BrainFlowStream
 # Block evaluation parameters
 # -----------------------------------------------------------------------------
 
-DEFAULT_FLICKER_HZ = 12.0
+DEFAULT_FLICKER_HZ = 7.5
 N_WINDOWS = 3
 WINDOW_DURATION_S = 10.0
 MONITOR_HZ_FALLBACK = 60.0
