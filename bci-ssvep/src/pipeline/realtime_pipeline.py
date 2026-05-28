@@ -24,3 +24,10 @@ class RealtimeCCAPipeline:
             n_harmonics=n_harmonics,
             labels=self._labels
         )
+
+        self._lock = threading.Lock()
+        self._latest_label: str = "---"
+        self._latest_scores: list[float] = []
+        self._latest_peak_hz: float = 0.0
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
