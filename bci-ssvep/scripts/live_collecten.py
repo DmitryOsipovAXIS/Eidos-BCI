@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pygame
 from scipy.signal import welch
@@ -370,6 +371,70 @@ def _run_alternating(
     return results
 
 
+def _show_report(
+    eeg: Optional[np.ndarray],
+    fs: float,
+    frequencies_hz: list[float],
+    all_guesses: list[str],
+) -> None:
+    from collections import Counter
+    from pipeline.preprocessing import common_average_reference
+    from pipeline.signal_filtering import apply_filters
+
+    counts = Counter(all_guesses)
+    total = len(all_guesses)
+    print("\n" + "=" * 40, flush=True)
+    print("  LIVE CLASSIFICATION REPORT", flush=True)
+    print("=" * 40, flush=True)
+    print(f"  Total guesses : {total}", flush=True)
+    for lbl in ["LEFT", "RIGHT"]:
+        n = counts.get(lbl, 0)
+        pct = (n / total * 100) if total > 0 else 0.0
+        print(f"  {lbl:>6}        : {n}  ({pct:.1f}%)", flush=True)
+    print("=" * 40 + "\n", flush=True)
+
+    if eeg is None or eeg.shape[1] < 10:
+        return
+
+    proc = common_average_reference(eeg)
+    proc = apply_filters(proc, fs)
+    n_ch, n_samples = eeg.shape
+    t = np.arange(n_samples) / fs
+    freqs_fft = np.fft.rfftfreq(n_samples, 1.0 / fs)
+
+    fig, axes = plt.subplots(n_ch, 2, figsize=(14, max(6, n_ch * 1.8)), sharex="col")
+    if n_ch == 1:
+        axes = axes[np.newaxis, :]
+    for ch in range(n_ch):
+        axes[ch, 0].plot(t, eeg[ch], lw=0.7, alpha=0.8)
+        axes[ch, 1].plot(t, proc[ch], lw=0.7, alpha=0.8, color="orange")
+        axes[ch, 0].set_ylabel(f"CH{ch}")
+        axes[ch, 1].set_ylabel(f"CH{ch}")
+    axes[0, 0].set_title("Raw EEG")
+    axes[0, 1].set_title("Filtered (CAR + notch + bandpass)")
+    axes[-1, 0].set_xlabel("Time (s)")
+    axes[-1, 1].set_xlabel("Time (s)")
+    fig.suptitle("Raw vs Filtered EEG", fontsize=13)
+    fig.tight_layout()
+
+    fft_mag = np.abs(np.fft.rfft(proc, axis=-1)) ** 2
+    mean_psd = fft_mag.mean(axis=0)
+    fig2, ax = plt.subplots(figsize=(10, 4))
+    ax.semilogy(freqs_fft, mean_psd, lw=1.2)
+    for f in frequencies_hz:
+        ax.axvline(f, color="red", lw=1.2, ls="--", alpha=0.8, label=f"{f} Hz")
+        for h in range(2, 4):
+            ax.axvline(f * h, color="orange", lw=0.8, ls=":", alpha=0.5)
+    ax.set_xlim(0, 45)
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("Power (a.u.)")
+    ax.set_title("PSD — mean over channels (filtered)")
+    ax.legend()
+    fig2.tight_layout()
+
+    plt.show()
+
+
 def _print_psd_summary(eeg: np.ndarray, fs: float, target_hz: float) -> None:
     freqs, mean_psd = _compute_psd(eeg, fs)
     mask = (freqs >= target_hz - 2.0) & (freqs <= target_hz + 2.0)
@@ -510,8 +575,10 @@ def main() -> None:
                 pass
             stream.release_session()
 
+        all_guesses = rt_pipeline.get_full_history() if rt_pipeline is not None else []
         if not eeg_list:
             print("No EEG recorded.", flush=True)
+            _show_report(None, fs or 125.0, frequencies_hz, all_guesses)
             return
         if args.save:
             config = SSVEPConfig(left_hz=left_hz, right_hz=right_hz)
@@ -525,6 +592,7 @@ def main() -> None:
             np.save(x_path, X)
             np.save(y_path, y)
             print(f"Saved raw data -> {x_path}  {y_path}", flush=True)
+        _show_report(eeg_list[0], fs or 125.0, frequencies_hz, all_guesses)
         return
 
     eeg = _run_single(
@@ -553,6 +621,8 @@ def main() -> None:
             flush=True,
         )
     _print_psd_summary(eeg, fs or 125.0, hz)
+    all_guesses = rt_pipeline.get_full_history() if rt_pipeline is not None else []
+    _show_report(eeg, fs or 125.0, frequencies_hz, all_guesses)
 
     if args.save:
         config = SSVEPConfig(left_hz=hz, right_hz=hz)

@@ -20,6 +20,7 @@ class RealtimeCCAPipeline:
         self._confidence_ratio = confidence_ratio
         self._min_absolute = min_absolute
         self._history: list[str] = []
+        self._all_guesses: list[str] = []
         self._vote_window: int = 5
         self._vote_threshold: int = 3
 
@@ -47,9 +48,13 @@ class RealtimeCCAPipeline:
         if self._thread is not None:
             self._thread.join(timeout=5.0)
     
-    def get_latest(self) -> tuple[str,list[float], float]:
+    def get_latest(self) -> tuple[str, list[float], float]:
         with self._lock:
             return self._latest_label, list(self._latest_scores), self._latest_peak_hz
+
+    def get_full_history(self) -> list[str]:
+        with self._lock:
+            return list(self._all_guesses)
         
     def is_confident(self, scores:list[float]) -> bool:
         arr = np.array(scores)
@@ -80,6 +85,7 @@ class RealtimeCCAPipeline:
                 peak_hz = self._frequencies_hz[int(np.argmax(scores))]
 
                 self._history.append(label)
+                self._all_guesses.append(label)
                 if len(self._history) > self._vote_window:
                     self._history.pop(0)
 
