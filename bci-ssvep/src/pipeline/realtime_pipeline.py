@@ -4,12 +4,14 @@ import threading
 import time
 from typing import Optional
 
+from collections import Counter
+
 import numpy as np
 
 from pipeline.pipeline import SSVEPPipeline
 
 class RealtimeCCAPipeline:
-    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 2.0, step_s: float = 1.0, n_harmonics: int = 3, labels: list[str]|None = None, confidence_ratio: float = 1.3, min_absolute: float = 0.02,) -> None:
+    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 4.0, step_s: float = 0.5, n_harmonics: int = 3, labels: list[str]|None = None, confidence_ratio: float = 1.3, min_absolute: float = 0.02,) -> None:
         self._stream = stream
         self._window_samples = int(window_s * sample_rate_hz)
         self._step_s = step_s
@@ -17,6 +19,9 @@ class RealtimeCCAPipeline:
         self._frequencies_hz = frequencies_hz
         self._confidence_ratio = confidence_ratio
         self._min_absolute = min_absolute
+        self._history: list[str] = []
+        self._vote_window: int = 5
+        self._vote_threshold: int = 3
 
         self._pipeline = SSVEPPipeline(
             frequencies_hz=frequencies_hz,
@@ -74,8 +79,16 @@ class RealtimeCCAPipeline:
                 label, scores = self._pipeline.run(eeg)
                 peak_hz = self._frequencies_hz[int(np.argmax(scores))]
 
+                self._history.append(label)
+                if len(self._history) > self._vote_window:
+                    self._history.pop(0)
+
+                counts = Counter(self._history)
+                stable_label = counts.most_common(1)[0][0]
+                stable_enough = counts[stable_label] >= self._vote_threshold
+
                 with self._lock:
-                    self._latest_label = label
+                    self._latest_label = stable_label if stable_enough else "---"
                     self._latest_scores = scores
                     self._latest_peak_hz = peak_hz
 
