@@ -31,3 +31,13 @@ class RealtimeCCAPipeline:
         self._latest_peak_hz: float = 0.0
         self._running = False
         self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
