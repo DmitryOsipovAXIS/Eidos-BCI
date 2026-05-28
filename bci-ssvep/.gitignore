@@ -4,3 +4,4 @@ __pycache__/
 *.joblib
 data/raw/
 data/processed/
+data/other_tests
