@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(winget install SWIG.SWIG --location \"C:\\\\swigwin\" --accept-source-agreements --accept-package-agreements 2>&1)"
+    ]
+  }
+}
