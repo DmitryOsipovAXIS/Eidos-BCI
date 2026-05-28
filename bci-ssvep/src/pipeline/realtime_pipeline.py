@@ -41,3 +41,45 @@ class RealtimeCCAPipeline:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=5.0)
+    
+    def get_latest(self) -> tuple[str,list[float], float]:
+        with self._lock:
+            return self._latest_label, list(self._latest_scores), self._latest_peak_hz
+        
+    def is_confident(self, scores:list[float]) -> bool:
+        arr = np.array(scores)
+        if len(arr) < 2:
+            return False
+        best = float(np.max(arr))
+        if best < self._min_absolute:
+            return False
+        second = float(np.partition(arr, -2)[-2])
+        return (best / (second + 1e-9)) >= self._confidence_ratio
+    
+    def _loop(self) -> None:
+        while self._running:
+            try:
+                if self._stream.get_board_data_count() < self._window_samples:
+                    time.sleep(0.05)
+                    continue
+
+                raw = self._stream.get_current_board_data(self._window_samples)
+                eeg_idx = self._stream.eeg_channel_indices()
+                eeg = raw[eeg_idx, :]
+
+                if eeg.shape[1] < self._window_samples:
+                    time.sleep(0.05)
+                    continue
+
+                label, scores = self._pipeline.run(eeg)
+                peak_hz = self._frequencies_hz[int(np.argmax(scores))]
+
+                with self._lock:
+                    self._latest_label = label
+                    self._latest_scores = scores
+                    self._latest_peak_hz = peak_hz
+
+            except Exception:
+                pass
+
+            time.sleep(self._step_s)
