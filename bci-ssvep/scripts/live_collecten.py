@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 import threading
 import time
@@ -20,6 +21,7 @@ if str(ROOT / "src") not in sys.path:
 
 from utils.config import SSVEPConfig
 from pipeline.realtime_pipeline import RealtimeCCAPipeline
+from ws.websockets import start as ws_start, broadcast as ws_broadcast
 
 DEFAULT_MONITOR_HZ = 60.0
 DEFAULT_TARGET_HZ = 7.5
@@ -446,6 +448,18 @@ def _print_psd_summary(eeg: np.ndarray, fs: float, target_hz: float) -> None:
     print(f"Power at {target_hz:0.3f} Hz -> bin {freqs[idx]:0.3f} Hz, power={mean_psd[idx]:0.3g}", flush=True)
 
 
+def _start_ws_server() -> asyncio.AbstractEventLoop:
+    ws_loop = asyncio.new_event_loop()
+
+    def _run():
+        asyncio.set_event_loop(ws_loop)
+        ws_loop.run_until_complete(ws_start())
+
+    threading.Thread(target=_run, daemon=True).start()
+    print("WebSocket server started on ws://localhost:8765", flush=True)
+    return ws_loop
+
+
 def _init_board(args) -> tuple[Optional[object], Optional[float]]:
     from acquisition.brainflow_stream import BrainFlowStream
     from brainflow.board_shim import BoardIds, BoardShim, BrainFlowInputParams
@@ -546,6 +560,8 @@ def main() -> None:
     if stream is None and not args.no_eeg:
         stream, fs = _init_board(args)
 
+    ws_loop = _start_ws_server()
+
     rt_pipeline: Optional[RealtimeCCAPipeline] = None
     if stream is not None:
         rt_pipeline = RealtimeCCAPipeline(
@@ -556,6 +572,8 @@ def main() -> None:
             step_s=args.step_s,
             confidence_ratio=args.confidence_ratio,
             min_absolute=args.min_score,
+            ws_loop=ws_loop,
+            ws_broadcast=ws_broadcast,
         )
         rt_pipeline.start()
         print(f"Real-time CCA pipeline started (window={args.window_s}s, step={args.step_s}s)", flush=True)

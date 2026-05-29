@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 import time
-from typing import Optional
-
 from collections import Counter
+from typing import Optional
 
 import numpy as np
 
 from pipeline.pipeline import SSVEPPipeline
 
 class RealtimeCCAPipeline:
-    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 4.0, step_s: float = 0.5, n_harmonics: int = 3, labels: list[str]|None = None, confidence_ratio: float = 1.3, min_absolute: float = 0.02,) -> None:
+    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 4.0, step_s: float = 0.5, n_harmonics: int = 3, labels: list[str]|None = None, confidence_ratio: float = 1.3, min_absolute: float = 0.02, ws_loop: Optional[asyncio.AbstractEventLoop] = None, ws_broadcast=None,) -> None:
         self._stream = stream
         self._window_samples = int(window_s * sample_rate_hz)
         self._step_s = step_s
@@ -19,6 +20,9 @@ class RealtimeCCAPipeline:
         self._frequencies_hz = frequencies_hz
         self._confidence_ratio = confidence_ratio
         self._min_absolute = min_absolute
+        self._ws_loop = ws_loop
+        self._ws_broadcast = ws_broadcast
+        self._last_sent: str = ""
         self._history: list[str] = []
         self._all_guesses: list[str] = []
         self._vote_window: int = 5
@@ -97,6 +101,12 @@ class RealtimeCCAPipeline:
                     self._latest_label = stable_label if stable_enough else "---"
                     self._latest_scores = scores
                     self._latest_peak_hz = peak_hz
+
+                if stable_enough and stable_label != self._last_sent and self._ws_loop is not None and self._ws_broadcast is not None:
+                    event_type = "FUNCTION" if stable_label == "LEFT" else "WIDGET"
+                    msg = json.dumps({"type": event_type, "direction": stable_label, "peak_hz": peak_hz})
+                    asyncio.run_coroutine_threadsafe(self._ws_broadcast(msg), self._ws_loop)
+                    self._last_sent = stable_label
 
             except Exception:
                 pass
