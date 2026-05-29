@@ -173,7 +173,8 @@ def _start_menu(fullscreen: bool) -> dict:
         ("1", "Left 7.5 Hz for 2 minutes", {"mode": "single", "side": "left", "hz": 7.5, "duration": 120.0}),
         ("2", "Right 12 Hz for 2 minutes", {"mode": "single", "side": "right", "hz": 12.0, "duration": 120.0}),
         ("3", "Alternate 7.5/12 Hz for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0}),
-        ("4", "Use CLI settings (single or alt)", {"mode": "cli"}),
+        ("4", "Alternate BOTH flickers (7.5/12) for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0, "both_flicker": True}),
+        ("5", "Use CLI settings (single or alt)", {"mode": "cli"}),
     ]
 
     selected = None
@@ -205,7 +206,7 @@ def _start_menu(fullscreen: bool) -> dict:
             screen.blit(surf, rect)
             option_rects.append((rect.inflate(40, 16), _))
             y += 46
-        _draw_text_center(screen, fsml, "Press 1-4 or click an option (click to focus)", H - 90, GREY)
+        _draw_text_center(screen, fsml, "Press 1-5 or click an option (click to focus)", H - 90, GREY)
         _draw_text_center(screen, fsml, "ESC to quit", H - 60, GREY)
         pygame.display.flip()
         clock.tick(30)
@@ -292,6 +293,7 @@ def _run_alternating(
     alt_block_s: float,
     label_start: int,
     rt_pipeline: Optional[RealtimeCCAPipeline],
+    both_flicker: bool,
 ) -> list[np.ndarray]:
     pygame.init()
     info = pygame.display.Info()
@@ -339,10 +341,16 @@ def _run_alternating(
             left_phase = (left_phase + left_step) % 1.0
             right_phase = (right_phase + right_step) % 1.0
             block_left = max(0.0, (end_t - pygame.time.get_ticks()) / 1000.0)
+            if both_flicker:
+                left_on = left_phase < 0.5
+                right_on = right_phase < 0.5
+            else:
+                left_on = left_phase < 0.5 if label == 0 else False
+                right_on = right_phase < 0.5 if label == 1 else False
             _draw_dual(
                 screen, lrect, rrect,
-                left_phase < 0.5 if label == 0 else False,
-                right_phase < 0.5 if label == 1 else False,
+                left_on,
+                right_on,
                 label, left_hz, right_hz,
                 fbig, fmed, clock.get_fps(), block_left,
             )
@@ -500,6 +508,8 @@ def main() -> None:
     parser.add_argument("--alt-total", type=float, default=DEFAULT_ALT_TOTAL_S)
     parser.add_argument("--alt-block", type=float, default=DEFAULT_ALT_BLOCK_S)
     parser.add_argument("--alt-start", type=int, choices=[0, 1], default=0)
+    parser.add_argument("--both-flicker", action="store_true",
+        help="During alternating blocks, flicker both targets while cueing focus")
     parser.add_argument("--save", action="store_true", help="Save raw X/y to data/raw")
     parser.add_argument("--window-s", type=float, default=2.0)
     parser.add_argument("--step-s", type=float, default=1.0)
@@ -532,6 +542,7 @@ def main() -> None:
         right_hz = selection.get("right_hz", args.right_hz) if selection else args.right_hz
         alt_total_s = selection.get("alt_total", args.alt_total) if selection else args.alt_total
         alt_block_s = selection.get("alt_block", args.alt_block) if selection else args.alt_block
+        both_flicker = selection.get("both_flicker", args.both_flicker) if selection else args.both_flicker
         frequencies_hz = [left_hz, right_hz]
         print("collecten: alternating test", flush=True)
         print(f"total={alt_total_s:0.1f}s, block={alt_block_s:0.1f}s, left={left_hz:0.2f} Hz, right={right_hz:0.2f} Hz", flush=True)
@@ -542,6 +553,7 @@ def main() -> None:
         duration_s = args.single_duration
         label = 0 if side == "left" else 1
         frequencies_hz = [args.left_hz, args.right_hz]
+        both_flicker = args.both_flicker
 
     if stream is None and not args.no_eeg:
         stream, fs = _init_board(args)
@@ -565,6 +577,7 @@ def main() -> None:
             args, stream, fs,
             left_hz, right_hz, alt_total_s, alt_block_s, args.alt_start,
             rt_pipeline,
+            both_flicker,
         )
         if rt_pipeline is not None:
             rt_pipeline.stop()
