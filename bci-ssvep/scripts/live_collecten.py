@@ -611,18 +611,17 @@ def main() -> None:
             print("No EEG recorded.", flush=True)
             _show_report(None, fs or 125.0, frequencies_hz, all_guesses)
             return
-        if args.save:
-            config = SSVEPConfig(left_hz=left_hz, right_hz=right_hz)
-            config.data_raw_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            min_len = min(x.shape[1] for x in eeg_list)
-            X = np.stack([x[:, :min_len] for x in eeg_list])
-            y = np.array([(args.alt_start + i) % 2 for i in range(len(eeg_list))], dtype=np.int64)
-            x_path = config.data_raw_dir / f"X_{ts}.npy"
-            y_path = config.data_raw_dir / f"y_{ts}.npy"
-            np.save(x_path, X)
-            np.save(y_path, y)
-            print(f"Saved raw data -> {x_path}  {y_path}", flush=True)
+        config = SSVEPConfig(left_hz=left_hz, right_hz=right_hz)
+        config.data_raw_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        min_len = min(x.shape[1] for x in eeg_list)
+        X = np.stack([x[:, :min_len] for x in eeg_list])
+        y = np.array([(args.alt_start + i) % 2 for i in range(len(eeg_list))], dtype=np.int64)
+        x_path = config.data_raw_dir / f"X_{ts}.npy"
+        y_path = config.data_raw_dir / f"y_{ts}.npy"
+        np.save(x_path, X)
+        np.save(y_path, y)
+        print(f"Saved raw data -> {x_path}  {y_path}", flush=True)
         _show_report(eeg_list[0], fs or 125.0, frequencies_hz, all_guesses)
         return
 
@@ -653,19 +652,19 @@ def main() -> None:
         )
     _print_psd_summary(eeg, fs or 125.0, hz)
     all_guesses = rt_pipeline.get_full_history() if rt_pipeline is not None else []
-    _show_report(eeg, fs or 125.0, frequencies_hz, all_guesses)
 
-    if args.save:
-        config = SSVEPConfig(left_hz=hz, right_hz=hz)
-        config.data_raw_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        X = np.expand_dims(eeg, axis=0)
-        y = np.array([label], dtype=np.int64)
-        x_path = config.data_raw_dir / f"X_{ts}.npy"
-        y_path = config.data_raw_dir / f"y_{ts}.npy"
-        np.save(x_path, X)
-        np.save(y_path, y)
-        print(f"Saved raw data -> {x_path}  {y_path}", flush=True)
+    config = SSVEPConfig(left_hz=hz, right_hz=hz)
+    config.data_raw_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    X = np.expand_dims(eeg, axis=0)
+    y = np.array([label], dtype=np.int64)
+    x_path = config.data_raw_dir / f"X_{ts}.npy"
+    y_path = config.data_raw_dir / f"y_{ts}.npy"
+    np.save(x_path, X)
+    np.save(y_path, y)
+    print(f"Saved raw data -> {x_path}  {y_path}", flush=True)
+
+    _show_report(eeg, fs or 125.0, frequencies_hz, all_guesses)
 
 
 if __name__ == "__main__":
