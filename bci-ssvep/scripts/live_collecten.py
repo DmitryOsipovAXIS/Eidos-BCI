@@ -47,7 +47,7 @@ def _set_mode(size: tuple[int, int], fullscreen: bool) -> pygame.Surface:
     if fullscreen:
         flags |= pygame.FULLSCREEN
     try:
-        return pygame.display.set_mode(size, flags, vsync=1)
+        return pygame.display.set_mode(size, flags, vsync=0)
     except TypeError:
         return pygame.display.set_mode(size, flags)
 
