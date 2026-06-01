@@ -30,7 +30,7 @@ DEFAULT_DISCARD_S = 1.5
 
 DEFAULT_LEFT_HZ = 7.5
 DEFAULT_RIGHT_HZ = 12.0
-DEFAULT_ALT_TOTAL_S = 10 * 60.0
+DEFAULT_ALT_TOTAL_S = 2 * 60.0
 DEFAULT_ALT_BLOCK_S = 30.0
 DEFAULT_CUE_S = 1.0
 
@@ -174,8 +174,8 @@ def _start_menu(fullscreen: bool) -> dict:
     options = [
         ("1", "Left 7.5 Hz for 2 minutes", {"mode": "single", "side": "left", "hz": 7.5, "duration": 120.0}),
         ("2", "Right 12 Hz for 2 minutes", {"mode": "single", "side": "right", "hz": 12.0, "duration": 120.0}),
-        ("3", "Alternate 7.5/12 Hz for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0}),
-        ("4", "Alternate BOTH flickers (7.5/12) for 10 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 600.0, "alt_block": 30.0, "both_flicker": True}),
+        ("3", "Alternate 7.5/12 Hz for 2 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 120.0, "alt_block": 30.0}),
+        ("4", "Alternate BOTH flickers (7.5/12) for 2 minutes", {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 120.0, "alt_block": 30.0, "both_flicker": True}),
         ("5", "Use CLI settings (single or alt)", {"mode": "cli"}),
     ]
 
