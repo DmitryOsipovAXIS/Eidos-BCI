@@ -359,10 +359,7 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
         rt_pipeline = _start_rt_pipeline(
             stream, frequencies_hz, fs or 125.0, args)
     if args.mode == "live":
-        try:
-            run_live(args, args.left_hz, args.right_hz, rt_pipeline)
-        except Exception:
-            import traceback; traceback.print_exc()
+        run_live(args, args.left_hz, args.right_hz, rt_pipeline)
     elif args.mode == "alt":
         _run_alt_mode(
             args, stream, fs,
@@ -404,7 +401,7 @@ if __name__ == "__main__":
                         help="Save raw X/y to data/raw")
     parser.add_argument("--window-s", type=float, default=2.0)
     parser.add_argument("--step-s", type=float, default=1.0)
-    parser.add_argument("--confidence-ratio", type=float, default=1.3)
+    parser.add_argument("--confidence-ratio", type=float, default=1.0)
     parser.add_argument("--min-score", type=float, default=0.02)
     parsed = parser.parse_args()
 

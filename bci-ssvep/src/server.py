@@ -6,7 +6,7 @@ from realtime.pipeline import start_live, LiveCollectArgs
 
 async def main():
     loop = asyncio.get_running_loop()
-    args = LiveCollectArgs(no_eeg=False)
+    args = LiveCollectArgs(no_eeg=False, serial_port = "COM3")
 
     await asyncio.gather(
         start(),
