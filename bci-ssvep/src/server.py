@@ -1,7 +1,7 @@
 import asyncio
 from ws.websockets import start, broadcast
 from ws.http import start_http
-from collection.live_collecten import start_live, LiveCollectArgs
+from src.collection.pipeline import start_live, LiveCollectArgs
 
 
 async def main():
