@@ -91,7 +91,8 @@ class RealtimeCCAPipeline:
                 peak_hz = self._frequencies_hz[int(np.argmax(scores))]
 
                 self._history.append(label)
-                self._all_guesses.append(label)
+                if label != "NEUTRAL":
+                    self._all_guesses.append(label)
                 if len(self._history) > self._vote_window:
                     self._history.pop(0)
 
@@ -99,8 +100,12 @@ class RealtimeCCAPipeline:
                 stable_label = counts.most_common(1)[0][0]
                 stable_enough = counts[stable_label] >= self._vote_threshold
 
+                display_label = stable_label if stable_enough else "---"
+                if stable_enough and display_label != self._last_sent:
+                    print(f"[CCA] {display_label}  scores={[f'{s:.3f}' for s in scores]}  peak={peak_hz:.1f}Hz", flush=True)
+
                 with self._lock:
-                    self._latest_label = stable_label if stable_enough else "---"
+                    self._latest_label = display_label
                     self._latest_scores = scores
                     self._latest_peak_hz = peak_hz
 
