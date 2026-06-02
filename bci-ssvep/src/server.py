@@ -1,12 +1,12 @@
 import asyncio
 from ws.websockets import start, broadcast
 from ws.http import start_http
-from src.collection.pipeline import start_live, LiveCollectArgs
+from realtime.pipeline import start_live, LiveCollectArgs
 
 
 async def main():
     loop = asyncio.get_running_loop()
-    args = LiveCollectArgs(no_eeg=True)
+    args = LiveCollectArgs(no_eeg=False)
 
     await asyncio.gather(
         start(),

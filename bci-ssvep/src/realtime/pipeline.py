@@ -1,7 +1,7 @@
 """SSVEP collection with a start menu and single/alternating modes."""
 from __future__ import annotations
 from utils.config import SSVEPConfig
-from ui.screens import run_alternating, run_single, start_menu
+from ui.screens import run_alternating, run_live, run_single, start_menu
 from pipeline.realtime_pipeline import RealtimeCCAPipeline
 from acquisition.recording import init_board
 
@@ -339,6 +339,9 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
         frequencies_hz = [left_hz, right_hz]
         print("collecten: alternating test", flush=True)
         print(f"total={alt_total_s:0.1f}s, block={alt_block_s:0.1f}s, left={left_hz:0.2f} Hz, right={right_hz:0.2f} Hz", flush=True)
+    elif args.mode == "live":
+        frequencies_hz = [args.left_hz, args.right_hz]
+        print(f"live mode: left={args.left_hz:.2f} Hz, right={args.right_hz:.2f} Hz", flush=True)
     else:
         print("collecten: using CLI settings", flush=True)
         side = args.single_side
@@ -355,8 +358,12 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
     if stream is not None:
         rt_pipeline = _start_rt_pipeline(
             stream, frequencies_hz, fs or 125.0, args)
-
-    if args.mode == "alt":
+    if args.mode == "live":
+        try:
+            run_live(args, args.left_hz, args.right_hz, rt_pipeline)
+        except Exception:
+            import traceback; traceback.print_exc()
+    elif args.mode == "alt":
         _run_alt_mode(
             args, stream, fs,
             left_hz, right_hz, alt_total_s, alt_block_s, both_flicker,

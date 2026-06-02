@@ -11,8 +11,13 @@ from acquisition.recording import RecordingResult, start_recording_thread
 from pipeline.realtime_pipeline import RealtimeCCAPipeline
 from ui.drawing import (
     BG,
+    BLUE,
+    DIM,
     GREY,
+    RED,
+    WHITE,
     draw_dual,
+    draw_fps,
     draw_inference_box,
     draw_single,
     draw_text_center,
@@ -74,6 +79,8 @@ def start_menu(fullscreen: bool) -> dict:
          {"mode": "alt", "left_hz": 7.5, "right_hz": 12.0, "alt_total": 120.0, "alt_block": 30.0, "both_flicker": True}),
         ("5", "Use CLI settings (single or alt)",
          {"mode": "cli"}),
+         ("6", "Live mode (no timer, no save)", {"mode": "live"}),
+
     ]
 
     selected = None
@@ -274,6 +281,72 @@ def run_alternating(
 
         if not running:
             break
-
     pygame.quit()
     return results
+
+def run_live(
+        args, left_hz: float, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipeline],
+) -> None:
+    pygame.init()
+    W, H = _screen_size(args.fullscreen)
+    screen = _set_mode((W, H), args.fullscreen)
+    pygame.display.set_caption("SSVEP LIVE")
+    clock = pygame.time.Clock()
+    fbig, fmed, fsml = _make_fonts(H)
+
+    bw = int(W * DUAL_BOX_W_RATIO)
+    bh = int(H * DUAL_BOX_H_RATIO)
+    cy = H // 2
+    
+    lrect = pygame.Rect(int(W*DUAL_LEFT_X_RATIO), cy-bh // 2,bw,bh)
+    rrect = pygame.Rect(int(W*DUAL_RIGHT_X_RATIO), cy-bh//2,bw,bh)
+
+    left_step = left_hz / args.monitor_hz
+    right_step = right_hz / args.monitor_hz
+    left_phase = right_phase = 0.0
+    left_count = right_count = neutral_count = 0
+    last_label = ""
+    running = True
+
+    while running:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
+                running = False
+
+        left_phase = (left_phase + left_step) % 1.0
+        right_phase = (right_phase + right_step) % 1.0
+
+        if rt_pipeline is not None:
+            rt_label, rt_scores, rt_peak_hz = rt_pipeline.get_latest()
+            if rt_label != last_label:
+                if rt_label == "LEFT":
+                    left_count += 1
+                elif rt_label == "RIGHT":
+                    right_count += 1
+                elif rt_label == "NEUTRAL":
+                    neutral_count += 1
+            last_label = rt_label
+        else:
+            rt_label, rt_scores, rt_peak_hz = "---", [], 0.0
+
+        screen.fill(BG)
+        pygame.draw.rect(screen, WHITE if left_phase < 0.5 else DIM, lrect)
+        pygame.draw.rect(screen, WHITE if right_phase < 0.5 else DIM, rrect)
+        pygame.draw.rect(screen, BLUE, lrect, 4)
+        pygame.draw.rect(screen, RED, rrect, 4)
+        for text, color, x, y in [
+            (str(left_count), BLUE, lrect.centerx, lrect.top - 50),
+            (str(neutral_count), GREY, W // 2, H // 8),
+            (str(right_count), RED, rrect.centerx, rrect.top - 50),
+        ]:
+            s = fbig.render(text, True, color)
+            screen.blit(s, s.get_rect(center=(x, y)))
+        draw_text_center(screen, fmed, f"Left {left_hz:.1f} Hz", lrect.bottom + 22, BLUE)
+        draw_text_center(screen, fmed, f"Right {right_hz:.1f} Hz", rrect.bottom + 22, RED)
+        draw_fps(screen, fmed, clock.get_fps())
+        draw_inference_box(screen, fmed, fsml, rt_label, rt_scores, rt_peak_hz)
+
+        pygame.display.flip()
+        clock.tick(args.monitor_hz)
+
+    pygame.quit()
