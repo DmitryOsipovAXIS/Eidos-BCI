@@ -86,6 +86,8 @@ class RealtimeCCAPipeline:
                     continue
 
                 label, scores = self._pipeline.run(eeg)
+                if not self.is_confident(scores):
+                    label = "NEUTRAL"
                 peak_hz = self._frequencies_hz[int(np.argmax(scores))]
 
                 self._history.append(label)
