@@ -340,11 +340,19 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
         print("collecten: alternating test", flush=True)
         print(f"total={alt_total_s:0.1f}s, block={alt_block_s:0.1f}s, left={left_hz:0.2f} Hz, right={right_hz:0.2f} Hz", flush=True)
     elif args.mode == "live":
+<<<<<<< HEAD
         frequencies_hz = [args.left_hz, args.right_hz]
         print(f"live mode: left={args.left_hz:.2f} Hz, right={args.right_hz:.2f} Hz", flush=True)
     elif args.mode == "one_box_live":
         frequencies_hz = [args.right_hz]
         print(f"one-box live mode: {args.right_hz:.2f} Hz", flush=True)
+=======
+        left_hz = _sel(selection, "left_hz", args.left_hz)
+        right_hz = _sel(selection, "right_hz", args.right_hz)
+        frequencies_hz = [left_hz, right_hz]
+        print(
+            f"live mode: left={left_hz:.2f} Hz, right={right_hz:.2f} Hz", flush=True)
+>>>>>>> f42de11a19af0623d756959d5f39c6a03cc2bb48
     else:
         print("collecten: using CLI settings", flush=True)
         side = args.single_side
@@ -362,9 +370,13 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
         rt_pipeline = _start_rt_pipeline(
             stream, frequencies_hz, fs or 125.0, args)
     if args.mode == "live":
+<<<<<<< HEAD
         run_live(args, args.left_hz, args.right_hz, rt_pipeline)
     elif args.mode == "one_box_live":
         one_box_live(args, args.right_hz, rt_pipeline)
+=======
+        run_live(args, left_hz, right_hz, rt_pipeline)
+>>>>>>> f42de11a19af0623d756959d5f39c6a03cc2bb48
     elif args.mode == "alt":
         _run_alt_mode(
             args, stream, fs,
@@ -389,7 +401,7 @@ if __name__ == "__main__":
     parser.add_argument("--monitor-hz", type=float, default=DEFAULT_MONITOR_HZ)
     parser.add_argument("--discard", type=float, default=DEFAULT_DISCARD_S)
     parser.add_argument(
-        "--mode", choices=["menu", "single", "alt"], default="menu")
+        "--mode", choices=["menu", "single", "alt", "live"], default="menu")
     parser.add_argument("--single-hz", type=float, default=DEFAULT_TARGET_HZ)
     parser.add_argument(
         "--single-side", choices=["left", "right"], default="left")

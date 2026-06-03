@@ -23,7 +23,7 @@ class EventHandler(BaseHTTPRequestHandler):
             return
 
         ts = str(datetime.now().timestamp())
-        message = '{"type": "' + event_type + '", "timestamp": ' + ts + '}'
+        message = '{"type": "' + event_type + '"}'
 
         asyncio.run_coroutine_threadsafe(
             self.server.broadcast(message), self.server.loop)
