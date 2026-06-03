@@ -23,6 +23,9 @@ from ui.drawing import (
     draw_text_center,
 )
 
+import asyncio
+import json
+
 SINGLE_BOX_W_RATIO = 0.35
 SINGLE_BOX_H_RATIO = 0.50
 SINGLE_BOX_LEFT_X_RATIO = 0.12
@@ -116,7 +119,7 @@ def start_menu(fullscreen: bool) -> dict:
             y += 46
 
         draw_text_center(
-            screen, fsml, "Press 1-7 or click an option", H - 90, GREY)
+            screen, fsml, "Press 1-5 or click an option", H - 90, GREY)
         draw_text_center(screen, fsml, "ESC to quit", H - 60, GREY)
         pygame.display.flip()
         clock.tick(30)
@@ -285,7 +288,7 @@ def run_alternating(
     return results
 
 def run_live(
-        args, left_hz: float, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipeline],
+        args, left_hz: float, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipeline], broadcast=None, loop=None,
 ) -> None:
     pygame.init()
     W, H = _screen_size(args.fullscreen)
@@ -325,6 +328,12 @@ def run_live(
                     right_count += 1
                 elif rt_label == "NEUTRAL":
                     neutral_count += 1
+                action_map = {"RIGHT": "WIDGET", "LEFT": "FUNCTION"}
+                action = action_map.get(rt_label, rt_label)
+                if broadcast is not None and loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores})), loop
+                    )
             last_label = rt_label
         else:
             rt_label, rt_scores, rt_peak_hz = "---", [], 0.0
@@ -351,7 +360,7 @@ def run_live(
 
     pygame.quit()
 
-def one_box_live(args, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipeline],) -> None:
+def one_box_live(args, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipeline],broadcast=None, loop=None) -> None:
     pygame.init()
     W, H = _screen_size(args.fullscreen)
     screen = _set_mode((W, H), args.fullscreen)
@@ -382,8 +391,14 @@ def one_box_live(args, right_hz: float, rt_pipeline: Optional[RealtimeCCAPipelin
             if rt_label != last_label:
                 if rt_label == "RIGHT":
                     right_count += 1
-                elif rt_label not in ("---",):
+                elif rt_label == ("NEUTRAL",):
                     neutral_count += 1
+                action_map = {"RIGHT": "WIDGET", "LEFT": "FUNCTION"}
+                action = action_map.get(rt_label, rt_label)
+                if broadcast is not None and loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores})), loop
+                    )
             last_label = rt_label
         else:
             rt_label, rt_scores, rt_peak_hz = "---", [], 0.0
