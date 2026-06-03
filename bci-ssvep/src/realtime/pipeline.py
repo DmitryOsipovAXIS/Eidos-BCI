@@ -340,13 +340,15 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
         print("collecten: alternating test", flush=True)
         print(f"total={alt_total_s:0.1f}s, block={alt_block_s:0.1f}s, left={left_hz:0.2f} Hz, right={right_hz:0.2f} Hz", flush=True)
     elif args.mode == "live":
-        frequencies_hz = [args.left_hz, args.right_hz]
-        print(f"live mode: left={args.left_hz:.2f} Hz, right={args.right_hz:.2f} Hz", flush=True)
-    elif args.mode == "one_box_live":
-        frequencies_hz = [args.right_hz]
-        print(f"one-box live mode: {args.right_hz:.2f} Hz", flush=True)
         left_hz = _sel(selection, "left_hz", args.left_hz)
         right_hz = _sel(selection, "right_hz", args.right_hz)
+        frequencies_hz = [left_hz, right_hz]
+        print(f"live mode: left={left_hz:.2f} Hz, right={right_hz:.2f} Hz", flush=True)
+    elif args.mode == "one_box_live":
+        left_hz = _sel(selection, "left_hz", args.left_hz)
+        right_hz = _sel(selection, "right_hz", args.right_hz)
+        frequencies_hz = [left_hz, right_hz]
+        print(f"one-box live mode: {right_hz:.2f} Hz", flush=True)
         frequencies_hz = [left_hz, right_hz]
         print(
             f"live mode: left={left_hz:.2f} Hz, right={right_hz:.2f} Hz", flush=True)
