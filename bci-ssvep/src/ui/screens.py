@@ -6,6 +6,7 @@ from typing import Optional
 
 import numpy as np
 import pygame
+from datetime import datetime
 
 from acquisition.recording import RecordingResult, start_recording_thread
 from pipeline.realtime_pipeline import RealtimeCCAPipeline
@@ -332,7 +333,7 @@ def run_live(
                 action = action_map.get(rt_label, rt_label)
                 if broadcast is not None and loop is not None:
                     asyncio.run_coroutine_threadsafe(
-                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores})), loop
+                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores, "timestamp": (datetime.now().timestamp())})), loop
                     )
             last_label = rt_label
         else:
