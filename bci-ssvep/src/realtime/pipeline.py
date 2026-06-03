@@ -1,7 +1,7 @@
 """SSVEP collection with a start menu and single/alternating modes."""
 from __future__ import annotations
 from utils.config import SSVEPConfig
-from ui.screens import run_alternating, run_live, run_single, start_menu
+from ui.screens import one_box_live, run_alternating, run_live, run_single, start_menu
 from pipeline.realtime_pipeline import RealtimeCCAPipeline
 from acquisition.recording import init_board
 
@@ -342,6 +342,9 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
     elif args.mode == "live":
         frequencies_hz = [args.left_hz, args.right_hz]
         print(f"live mode: left={args.left_hz:.2f} Hz, right={args.right_hz:.2f} Hz", flush=True)
+    elif args.mode == "one_box_live":
+        frequencies_hz = [args.right_hz]
+        print(f"one-box live mode: {args.right_hz:.2f} Hz", flush=True)
     else:
         print("collecten: using CLI settings", flush=True)
         side = args.single_side
@@ -360,6 +363,8 @@ def start_live(args: LiveCollectArgs | None = None, broadcast=None, loop=None) -
             stream, frequencies_hz, fs or 125.0, args)
     if args.mode == "live":
         run_live(args, args.left_hz, args.right_hz, rt_pipeline)
+    elif args.mode == "one_box_live":
+        one_box_live(args, args.right_hz, rt_pipeline)
     elif args.mode == "alt":
         _run_alt_mode(
             args, stream, fs,
