@@ -102,7 +102,7 @@ class RealtimeCCAPipeline:
                     self._latest_scores = scores
                     self._latest_peak_hz = peak_hz
 
-                if stable_enough and stable_label != self._last_sent and self._ws_loop is not None and self._ws_broadcast is not None:
+                if stable_enough and stable_label != self._last_sent and self._ws_loop is not None and self._ws_broadcast is not None and self.is_confident(scores):
                     event_type = "FUNCTION" if stable_label == "LEFT" else "WIDGET"
                     msg = json.dumps({"type": event_type, "direction": stable_label, "peak_hz": peak_hz})
                     asyncio.run_coroutine_threadsafe(self._ws_broadcast(msg), self._ws_loop)
