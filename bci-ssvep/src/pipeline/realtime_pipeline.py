@@ -12,13 +12,14 @@ import numpy as np
 from pipeline.pipeline import SSVEPPipeline
 
 class RealtimeCCAPipeline:
-    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 4.0, step_s: float = 0.5, n_harmonics: int = 3, labels: list[str]|None = None, confidence_ratio: float = 1.3, min_absolute: float = 0.02, ws_loop: Optional[asyncio.AbstractEventLoop] = None, ws_broadcast=None,) -> None:
+    def __init__(self, stream, frequencies_hz: list[float], sample_rate_hz: float =125.0, window_s: float = 4.0, step_s: float = 0.5, n_harmonics: int = 3, labels: list[str]|None = None, left_threshold: float = 1.5, right_threshold: float = 1.1, min_absolute: float = 0.02, ws_loop: Optional[asyncio.AbstractEventLoop] = None, ws_broadcast=None,) -> None:
         self._stream = stream
         self._window_samples = int(window_s * sample_rate_hz)
         self._step_s = step_s
         self._labels = labels or ["LEFT", "RIGHT"]
         self._frequencies_hz = frequencies_hz
-        self._confidence_ratio = confidence_ratio
+        self._left_threshold = left_threshold
+        self._right_threshold = right_threshold
         self._min_absolute = min_absolute
         self._ws_loop = ws_loop
         self._ws_broadcast = ws_broadcast
@@ -61,7 +62,7 @@ class RealtimeCCAPipeline:
         with self._lock:
             return list(self._all_guesses)
         
-    def is_confident(self, scores:list[float]) -> bool:
+    def is_confident(self, scores:list[float], label:str |None = None) -> bool:
         arr = np.array(scores)
         if len(arr) < 2:
             return False
@@ -69,7 +70,8 @@ class RealtimeCCAPipeline:
         if best < self._min_absolute:
             return False
         second = float(np.partition(arr, -2)[-2])
-        return (best / (second + 1e-9)) >= self._confidence_ratio
+        ratio = self._left_threshold if label == "LEFT" else self._right_threshold
+        return (best / (second +1e-9)) >= ratio
     
     def _loop(self) -> None:
         while self._running:
@@ -103,7 +105,7 @@ class RealtimeCCAPipeline:
                     self._latest_scores = scores
                     self._latest_peak_hz = peak_hz
 
-                if stable_enough and stable_label != self._last_sent and self._ws_loop is not None and self._ws_broadcast is not None and self.is_confident(scores):
+                if stable_enough and stable_label != self._last_sent and self._ws_loop is not None and self._ws_broadcast is not None and self.is_confident(scores, stable_label):
                     event_type = "FUNCTION" if stable_label == "LEFT" else "WIDGET"
                     msg = json.dumps({"type": event_type, "direction": stable_label, "peak_hz": peak_hz})
                     asyncio.run_coroutine_threadsafe(self._ws_broadcast(msg), self._ws_loop)

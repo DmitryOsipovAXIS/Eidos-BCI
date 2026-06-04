@@ -325,7 +325,7 @@ def run_live(
         if rt_pipeline is not None:
             rt_label, rt_scores, rt_peak_hz = rt_pipeline.get_latest()
             ts = datetime.now().timestamp()
-            if (rt_label != last_label or ts - last_timestamp > 5) and rt_pipeline.is_confident(rt_scores):
+            if (rt_label != last_label or ts - last_timestamp > 5) and rt_pipeline.is_confident(rt_scores, rt_label):
                 if rt_label == "LEFT":
                     left_count += 1
                 elif rt_label == "RIGHT":
@@ -336,7 +336,7 @@ def run_live(
                 action = action_map.get(rt_label, rt_label)
                 if broadcast is not None and loop is not None:
                     asyncio.run_coroutine_threadsafe(
-                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores, "timestamp": ts, "last_timestamp": last_timestamp, "time_diff": ts-last_timestamp})), loop
+                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores, "left_threshold": rt_pipeline._left_threshold, "right_threshold": rt_pipeline._right_threshold, "timestamp": ts, "last_timestamp": last_timestamp, "time_diff": ts-last_timestamp})), loop
                     )
                 last_timestamp = ts
             last_label = rt_label
