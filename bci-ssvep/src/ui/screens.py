@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+
 import numpy as np
 import pygame
 from datetime import datetime
@@ -310,6 +311,7 @@ def run_live(
     left_phase = right_phase = 0.0
     left_count = right_count = neutral_count = 0
     last_label = ""
+    last_timestamp = 0
     running = True
 
     while running:
@@ -322,7 +324,8 @@ def run_live(
 
         if rt_pipeline is not None:
             rt_label, rt_scores, rt_peak_hz = rt_pipeline.get_latest()
-            if rt_label != last_label:
+            ts = datetime.now().timestamp()
+            if (rt_label != last_label or ts - last_timestamp > 5) and rt_pipeline.is_confident(rt_scores, rt_label):
                 if rt_label == "LEFT":
                     left_count += 1
                 elif rt_label == "RIGHT":
@@ -333,11 +336,13 @@ def run_live(
                 action = action_map.get(rt_label, rt_label)
                 if broadcast is not None and loop is not None:
                     asyncio.run_coroutine_threadsafe(
-                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores, "timestamp": (datetime.now().timestamp())})), loop
+                        broadcast(json.dumps({"side": rt_label, "type": action, "scores": rt_scores, "left_threshold": rt_pipeline._left_threshold, "right_threshold": rt_pipeline._right_threshold, "timestamp": ts, "last_timestamp": last_timestamp, "time_diff": ts-last_timestamp})), loop
                     )
+                last_timestamp = ts
             last_label = rt_label
         else:
             rt_label, rt_scores, rt_peak_hz = "---", [], 0.0
+            last_timestamp = 0
 
         screen.fill(BG)
         pygame.draw.rect(screen, WHITE if left_phase < 0.5 else DIM, lrect)

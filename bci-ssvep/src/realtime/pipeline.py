@@ -54,7 +54,8 @@ class LiveCollectArgs:
     save: bool = False
     window_s: float = 2.0
     step_s: float = 1.0
-    confidence_ratio: float = 1.3
+    left_threshold: float = 1.45
+    right_threshold: float = 1.05
     min_score: float = 0.02
 
 
@@ -89,7 +90,8 @@ def _start_rt_pipeline(
         sample_rate_hz=fs,
         window_s=args.window_s,
         step_s=args.step_s,
-        confidence_ratio=args.confidence_ratio,
+        left_threshold=args.left_threshold,
+        right_threshold=args.right_threshold,
         min_absolute=args.min_score,
     )
     rt_pipeline.start()
