@@ -2,3 +2,7 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 *.joblib
+data/raw/
+data/processed/
+data/other_tests
+data/

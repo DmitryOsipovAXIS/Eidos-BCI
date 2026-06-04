@@ -22,10 +22,12 @@ class BrainFlowStream:
         board_id: Optional[int] = None,
         params: Optional[BrainFlowInputParams] = None,
         log_board: bool = False,
+        num_channels: Optional[int] = None,
     ) -> None:
         self.board_id = int(board_id) if board_id is not None else int(BoardIds.SYNTHETIC_BOARD)
         self.params = params or BrainFlowInputParams()
         self._board: Optional[BoardShim] = None
+        self._num_channels = num_channels
 
         if log_board:
             BoardShim.enable_board_logger()
@@ -40,7 +42,10 @@ class BrainFlowStream:
         return float(BoardShim.get_sampling_rate(self.board_id))
 
     def eeg_channel_indices(self) -> list[int]:
-        return list(BoardShim.get_eeg_channels(self.board_id))
+        all_ch = list(BoardShim.get_eeg_channels(self.board_id))
+        if self._num_channels is not None:
+            return all_ch[:self._num_channels]
+        return all_ch
 
     def prepare_session(self) -> None:
         self._board = BoardShim(self.board_id, self.params)
