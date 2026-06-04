@@ -76,6 +76,16 @@ def _broadcast_no_eeg(broadcast, loop) -> None:
         asyncio.run_coroutine_threadsafe(broadcast("No EEG recorded."), loop)
     print("No EEG recorded.", flush=True)
 
+def _is_confident(self, scores:list[float]) -> bool:
+    arr = np.array(scores)
+    if len(arr) < 2:
+        return False
+    best = float(np.max(arr))
+    if best < self._min_absolute:
+        return False
+    second = float(np.partition(arr, -2)[-2])
+    return (best / (second + 1e-9)) >= self._confidence_ratio
+
 
 def _start_rt_pipeline(
     stream,
