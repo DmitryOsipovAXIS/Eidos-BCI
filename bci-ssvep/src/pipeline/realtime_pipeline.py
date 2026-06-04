@@ -23,6 +23,7 @@ class RealtimeCCAPipeline:
         self._ws_loop = ws_loop
         self._ws_broadcast = ws_broadcast
         self._last_sent: str = ""
+        self._last_sent_time: float = 0.0
         self._history: list[str] = []
         self._all_guesses: list[str] = []
         self._vote_window: int = 5

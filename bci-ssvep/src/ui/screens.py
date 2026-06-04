@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+from pipeline.realtime_pipeline import is_confident
+
 import numpy as np
 import pygame
 from datetime import datetime
@@ -324,7 +326,7 @@ def run_live(
         if rt_pipeline is not None:
             rt_label, rt_scores, rt_peak_hz = rt_pipeline.get_latest()
             ts = datetime.now().timestamp()
-            if rt_label != last_label or ts - last_timestamp > 5:
+            if (rt_label != last_label or ts - last_timestamp > 5) and rt_pipeline.is_confident(rt_scores):
                 if rt_label == "LEFT":
                     left_count += 1
                 elif rt_label == "RIGHT":
