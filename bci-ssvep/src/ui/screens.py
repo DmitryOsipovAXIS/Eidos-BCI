@@ -4,7 +4,6 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from pipeline.realtime_pipeline import is_confident
 
 import numpy as np
 import pygame
