@@ -54,8 +54,8 @@ class LiveCollectArgs:
     save: bool = False
     window_s: float = 2.0
     step_s: float = 1.0
-    left_threshold: float = 1.5
-    right_threshold: float = 1.1
+    left_threshold: float = 1.45
+    right_threshold: float = 1.05
     min_score: float = 0.02
 
 
