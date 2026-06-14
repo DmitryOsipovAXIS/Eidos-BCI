@@ -21,7 +21,10 @@ class SSVEPConfig:
     left_hz: float = 8.0
     right_hz: float = 15.0
     bandpass_margin_hz: float = 2.0
+    bandpass_low_hz: float = 0.5
+    bandpass_high_hz: float = 32.0
     window_seconds: float = 4.0
+    sample_rate_hz: float = 125.0
     project_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
 
     @property
@@ -40,7 +43,9 @@ class SSVEPConfig:
         """Wide band covering both SSVEP targets (for simple preprocessing)."""
         low = min(self.left_hz, self.right_hz) - self.bandpass_margin_hz
         high = max(self.left_hz, self.right_hz) + self.bandpass_margin_hz
-        return max(low, 0.5), high
+        low = max(low, self.bandpass_low_hz)
+        high = min(high, self.bandpass_high_hz)
+        return low, high
 
     def class_label_for_frequency(self, hz: float) -> int:
         """Return 0 (LEFT) or 1 (RIGHT) for the closer target frequency."""
